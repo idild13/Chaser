@@ -2,6 +2,7 @@ import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import React, { useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   Platform,
@@ -14,8 +15,11 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AddInvoiceModal from "@/components/AddInvoiceModal";
+import IssuerProfileModal from "@/components/IssuerProfileModal";
 import { useColors } from "@/hooks/useColors";
+import { useIssuerProfile } from "@/hooks/useIssuerProfile";
 import { Invoice, InvoiceStatus, useInvoices } from "@/context/InvoicesContext";
+import { exportInvoicePDF } from "@/utils/generateInvoicePDF";
 
 const AVATAR_COLORS = [
   { bg: "#EEEDFE", color: "#3C3489" },
@@ -58,9 +62,14 @@ export default function InvoicesScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { invoices, markPaid, deleteInvoice } = useInvoices();
+  const { profile, saveProfile } = useIssuerProfile();
+
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
-  const [modalVisible, setModalVisible] = useState(false);
+  const [addModalVisible, setAddModalVisible] = useState(false);
+  const [exportingId, setExportingId] = useState<string | null>(null);
+  const [pendingExportInv, setPendingExportInv] = useState<Invoice | null>(null);
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
 
   const filtered = invoices
     .filter((inv) => filter === "all" || inv.status === filter)
@@ -98,6 +107,37 @@ export default function InvoicesScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   }
 
+  async function handleExportPDF(inv: Invoice) {
+    if (!profile.name && !profile.email) {
+      setPendingExportInv(inv);
+      setProfileModalVisible(true);
+      return;
+    }
+    await doExport(inv, profile.name, profile.email);
+  }
+
+  async function doExport(inv: Invoice, name: string, email: string) {
+    setExportingId(inv.id);
+    try {
+      await exportInvoicePDF(inv, name, email);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (err) {
+      Alert.alert("Export Failed", "Could not generate the PDF. Please try again.");
+    } finally {
+      setExportingId(null);
+    }
+  }
+
+  async function handleProfileSave(p: { name: string; email: string }) {
+    saveProfile(p);
+    setProfileModalVisible(false);
+    if (pendingExportInv) {
+      const inv = pendingExportInv;
+      setPendingExportInv(null);
+      await doExport(inv, p.name, p.email);
+    }
+  }
+
   const s = styles(colors);
 
   return (
@@ -111,7 +151,7 @@ export default function InvoicesScreen() {
         </View>
         <TouchableOpacity
           style={s.addBtn}
-          onPress={() => setModalVisible(true)}
+          onPress={() => setAddModalVisible(true)}
         >
           <Feather name="plus" size={20} color="#fff" />
         </TouchableOpacity>
@@ -193,6 +233,8 @@ export default function InvoicesScreen() {
         ItemSeparatorComponent={() => <View style={s.separator} />}
         renderItem={({ item: inv }) => {
           const col = colorFor(inv.client);
+          const isExporting = exportingId === inv.id;
+
           return (
             <View style={s.invCard}>
               <View style={s.invCardTop}>
@@ -215,9 +257,15 @@ export default function InvoicesScreen() {
                 <View style={s.invMeta}>
                   <Feather name="hash" size={11} color={colors.mutedForeground} />
                   <Text style={s.invMetaText}>{inv.invnum}</Text>
-                  <Feather name="calendar" size={11} color={colors.mutedForeground} style={{ marginLeft: 8 }} />
+                  <Feather
+                    name="calendar"
+                    size={11}
+                    color={colors.mutedForeground}
+                    style={{ marginLeft: 8 }}
+                  />
                   <Text style={s.invMetaText}>Due {inv.due}</Text>
                 </View>
+
                 <View style={s.invActions}>
                   {inv.status !== "paid" && (
                     <TouchableOpacity
@@ -230,6 +278,17 @@ export default function InvoicesScreen() {
                       </Text>
                     </TouchableOpacity>
                   )}
+                  <TouchableOpacity
+                    style={s.actionBtnPDF}
+                    onPress={() => handleExportPDF(inv)}
+                    disabled={isExporting}
+                  >
+                    {isExporting ? (
+                      <ActivityIndicator size="small" color={colors.primary} />
+                    ) : (
+                      <Feather name="download" size={13} color={colors.primary} />
+                    )}
+                  </TouchableOpacity>
                   <TouchableOpacity
                     style={s.actionBtnDel}
                     onPress={() => handleDelete(inv)}
@@ -244,8 +303,19 @@ export default function InvoicesScreen() {
       />
 
       <AddInvoiceModal
-        visible={modalVisible}
-        onClose={() => setModalVisible(false)}
+        visible={addModalVisible}
+        onClose={() => setAddModalVisible(false)}
+      />
+
+      <IssuerProfileModal
+        visible={profileModalVisible}
+        initial={profile}
+        onSave={handleProfileSave}
+        onCancel={() => {
+          setProfileModalVisible(false);
+          setPendingExportInv(null);
+        }}
+        title="Your Invoice Details"
       />
     </View>
   );
@@ -260,8 +330,17 @@ function StatusBadge({ status }: { status: Invoice["status"] }) {
   };
   const c = config[status];
   return (
-    <View style={{ backgroundColor: c.bg, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}>
-      <Text style={{ fontSize: 11, fontFamily: "Inter_600SemiBold", color: c.text }}>{c.label}</Text>
+    <View
+      style={{
+        backgroundColor: c.bg,
+        borderRadius: 6,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+      }}
+    >
+      <Text style={{ fontSize: 11, fontFamily: "Inter_600SemiBold", color: c.text }}>
+        {c.label}
+      </Text>
     </View>
   );
 }
@@ -434,6 +513,7 @@ const styles = (colors: ReturnType<typeof useColors>) =>
       flexDirection: "row",
       alignItems: "center",
       gap: 4,
+      flex: 1,
     },
     invMetaText: {
       fontSize: 12,
@@ -457,6 +537,15 @@ const styles = (colors: ReturnType<typeof useColors>) =>
     actionBtnText: {
       fontSize: 12,
       fontFamily: "Inter_600SemiBold",
+    },
+    actionBtnPDF: {
+      backgroundColor: colors.primary + "15",
+      padding: 7,
+      borderRadius: 8,
+      width: 30,
+      height: 30,
+      alignItems: "center",
+      justifyContent: "center",
     },
     actionBtnDel: {
       backgroundColor: colors.dangerBg,
