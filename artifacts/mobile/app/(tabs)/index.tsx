@@ -102,13 +102,13 @@ export default function DashboardScreen() {
       <View style={s.header}>
         <View>
           <Text style={s.greeting}>Good morning</Text>
-          <Text style={s.subtitle}>Here's your money overview</Text>
+          <Text style={s.subtitle}>Here's what needs chasing</Text>
         </View>
         <TouchableOpacity
           style={s.addBtn}
           onPress={() => setModalVisible(true)}
         >
-          <Feather name="plus" size={20} color="#fff" />
+          <Feather name="plus" size={15} color="#fff" />
         </TouchableOpacity>
       </View>
 
@@ -183,7 +183,7 @@ export default function DashboardScreen() {
         </View>
 
         <View style={s.section}>
-          <Text style={s.sectionTitle}>Smart Suggestions</Text>
+          <Text style={s.sectionTitle}>Chase Priority</Text>
           {overdue.length === 0 && pending.length === 0 ? (
             <View style={[s.card, s.aiAllClear]}>
               <Feather name="check-circle" size={20} color={colors.success} />
@@ -372,12 +372,13 @@ const styles = (colors: ReturnType<typeof useColors>) =>
       marginTop: 2,
     },
     addBtn: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
+      width: 32,
+      height: 32,
+      borderRadius: 16,
       backgroundColor: colors.primary,
       alignItems: "center",
       justifyContent: "center",
+      alignSelf: "flex-end",
     },
     content: {
       paddingHorizontal: 16,

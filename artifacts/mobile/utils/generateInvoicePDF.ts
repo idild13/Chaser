@@ -297,8 +297,8 @@ function buildHTML(inv: Invoice, issuerName: string, issuerEmail: string): strin
           </svg>
         </div>
         <div>
-          <div class="brand-name">FreelancePay</div>
-          <div class="brand-tagline">Invoice Tracker</div>
+          <div class="brand-name">Chaser</div>
+          <div class="brand-tagline">Invoice & Payment Chaser</div>
         </div>
       </div>
       <div class="status-badge">${statusLabel(inv.status)}</div>
@@ -383,7 +383,7 @@ function buildHTML(inv: Invoice, issuerName: string, issuerEmail: string): strin
 
     <!-- FOOTER -->
     <div class="footer">
-      <span class="footer-brand">FreelancePay</span>
+      <span class="footer-brand">Chaser</span>
       <span class="footer-note">Generated ${today}</span>
     </div>
 
