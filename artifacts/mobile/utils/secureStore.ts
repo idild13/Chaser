@@ -1,5 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
+import { Platform } from "react-native";
+
+// expo-secure-store has no web implementation. On web we fall back to
+// AsyncStorage (localStorage-backed) — the OS keychain isn't available there
+// anyway, and this is also where pre-existing data already lives.
+const isWeb = Platform.OS === "web";
 
 const CHUNK_SIZE = 1900;
 
@@ -11,6 +17,8 @@ function countKey(key: string): string {
 }
 
 export async function secureGet(key: string): Promise<string | null> {
+  if (isWeb) return AsyncStorage.getItem(key);
+
   const countStr = await SecureStore.getItemAsync(countKey(key));
   if (countStr === null) return null;
 
@@ -29,6 +37,11 @@ export async function secureGet(key: string): Promise<string | null> {
 }
 
 export async function secureSet(key: string, value: string): Promise<void> {
+  if (isWeb) {
+    await AsyncStorage.setItem(key, value);
+    return;
+  }
+
   const oldCountStr = await SecureStore.getItemAsync(countKey(key));
   const oldCount =
     oldCountStr !== null ? parseInt(oldCountStr, 10) : 0;
@@ -53,6 +66,11 @@ export async function secureSet(key: string, value: string): Promise<void> {
 }
 
 export async function secureDelete(key: string): Promise<void> {
+  if (isWeb) {
+    await AsyncStorage.removeItem(key);
+    return;
+  }
+
   const countStr = await SecureStore.getItemAsync(countKey(key));
   const count = countStr !== null ? parseInt(countStr, 10) : 0;
   if (!isNaN(count) && count > 0) {
@@ -69,6 +87,20 @@ export async function migrateFromAsyncStorage(
   asyncStorageKey: string,
   secureKey: string
 ): Promise<string | null> {
+  if (isWeb) {
+    // On web, secure storage IS AsyncStorage. If the keys match, the data is
+    // already in place; otherwise move it once.
+    const existing = await AsyncStorage.getItem(secureKey);
+    if (existing !== null) return existing;
+    if (asyncStorageKey === secureKey) return null;
+    const raw = await AsyncStorage.getItem(asyncStorageKey);
+    if (raw !== null) {
+      await AsyncStorage.setItem(secureKey, raw);
+      await AsyncStorage.removeItem(asyncStorageKey);
+    }
+    return raw;
+  }
+
   const existing = await secureGet(secureKey);
   if (existing !== null) return existing;
 

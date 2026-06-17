@@ -1,1 +1,2 @@
 - [Chaser invoice money/status invariants](chaser-invoice-invariants.md) — derive money via computeInvoiceTotals + formatMoney, status via getEffectiveStatus, scope sums to primaryCurrency, escape PDF HTML.
+- [expo-secure-store web crash + RN sheet scroll](expo-secure-store-web.md) — expo-secure-store is native-only; guard with Platform.OS or it crashes web. RN ScrollView needs height-bounded ancestors (flex:1 + flexShrink:1).

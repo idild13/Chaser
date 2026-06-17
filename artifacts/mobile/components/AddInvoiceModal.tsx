@@ -302,7 +302,10 @@ export default function AddInvoiceModal({ visible, onClose }: Props) {
               { paddingBottom: insets.bottom + 8 },
             ]}
           >
-            <Pressable onPress={(e) => e.stopPropagation()}>
+            <Pressable
+              onPress={(e) => e.stopPropagation()}
+              style={s.sheetInner}
+            >
               <View style={s.handle} />
 
               <View style={s.header}>
@@ -313,8 +316,10 @@ export default function AddInvoiceModal({ visible, onClose }: Props) {
               </View>
 
               <ScrollView
+                style={s.scrollBody}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
+                contentContainerStyle={s.scrollContent}
               >
                 {/* Client */}
                 <View style={s.row}>
@@ -774,6 +779,7 @@ const styles = (colors: ReturnType<typeof useColors>) =>
       justifyContent: "flex-end",
     },
     avoidView: {
+      flex: 1,
       justifyContent: "flex-end",
     },
     sheet: {
@@ -783,6 +789,15 @@ const styles = (colors: ReturnType<typeof useColors>) =>
       paddingHorizontal: 20,
       paddingTop: 8,
       maxHeight: "90%",
+    },
+    sheetInner: {
+      flexShrink: 1,
+    },
+    scrollBody: {
+      flexShrink: 1,
+    },
+    scrollContent: {
+      paddingBottom: 16,
     },
     handle: {
       width: 40,
