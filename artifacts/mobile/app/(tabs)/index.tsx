@@ -16,7 +16,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AddInvoiceModal from "@/components/AddInvoiceModal";
 import { useColors } from "@/hooks/useColors";
+import { useIssuerProfile } from "@/hooks/useIssuerProfile";
 import { Invoice, useInvoices } from "@/context/InvoicesContext";
+import { sendEmailReminder } from "@/utils/sendEmailReminder";
 
 const AVATAR_COLORS = [
   { bg: "#EEEDFE", color: "#3C3489" },
@@ -77,6 +79,7 @@ export default function DashboardScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { invoices, metrics, markPaid } = useInvoices();
+  const { profile } = useIssuerProfile();
   const [modalVisible, setModalVisible] = useState(false);
 
   const recent = [...invoices].slice(-4).reverse();
@@ -212,11 +215,18 @@ export default function DashboardScreen() {
                         <Text style={[s.aiBtnText, { color: colors.successText }]}>Mark paid</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
+                        style={[s.aiBtn, { backgroundColor: colors.warningBg }]}
+                        onPress={() => sendEmailReminder(inv, profile.name)}
+                      >
+                        <Feather name="mail" size={13} color={colors.warning} />
+                        <Text style={[s.aiBtnText, { color: colors.warningText }]}>Send reminder</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
                         style={[s.aiBtn, { backgroundColor: colors.infoBg }]}
                         onPress={() => copyReminder(inv)}
                       >
                         <Feather name="copy" size={13} color={colors.info} />
-                        <Text style={[s.aiBtnText, { color: colors.infoText }]}>Copy reminder</Text>
+                        <Text style={[s.aiBtnText, { color: colors.infoText }]}>Copy</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -262,6 +272,15 @@ export default function DashboardScreen() {
                         <Feather name="check" size={13} color={colors.success} />
                         <Text style={[s.aiBtnText, { color: colors.successText }]}>Mark paid</Text>
                       </TouchableOpacity>
+                      {isUrgent && (
+                        <TouchableOpacity
+                          style={[s.aiBtn, { backgroundColor: colors.warningBg }]}
+                          onPress={() => sendEmailReminder(inv, profile.name)}
+                        >
+                          <Feather name="mail" size={13} color={colors.warning} />
+                          <Text style={[s.aiBtnText, { color: colors.warningText }]}>Send reminder</Text>
+                        </TouchableOpacity>
+                      )}
                     </View>
                   </View>
                 );

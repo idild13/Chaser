@@ -20,6 +20,7 @@ import { useColors } from "@/hooks/useColors";
 import { useIssuerProfile } from "@/hooks/useIssuerProfile";
 import { Invoice, InvoiceStatus, useInvoices } from "@/context/InvoicesContext";
 import { exportInvoicePDF } from "@/utils/generateInvoicePDF";
+import { sendEmailReminder } from "@/utils/sendEmailReminder";
 
 const AVATAR_COLORS = [
   { bg: "#EEEDFE", color: "#3C3489" },
@@ -276,6 +277,14 @@ export default function InvoicesScreen() {
                       <Text style={[s.actionBtnText, { color: colors.success }]}>
                         Paid
                       </Text>
+                    </TouchableOpacity>
+                  )}
+                  {(inv.status === "overdue" || inv.status === "pending") && (
+                    <TouchableOpacity
+                      style={s.actionBtnEmail}
+                      onPress={() => sendEmailReminder(inv, profile.name)}
+                    >
+                      <Feather name="mail" size={13} color={colors.warning} />
                     </TouchableOpacity>
                   )}
                   <TouchableOpacity
@@ -540,6 +549,15 @@ const styles = (colors: ReturnType<typeof useColors>) =>
     },
     actionBtnPDF: {
       backgroundColor: colors.primary + "15",
+      padding: 7,
+      borderRadius: 8,
+      width: 30,
+      height: 30,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    actionBtnEmail: {
+      backgroundColor: colors.warningBg,
       padding: 7,
       borderRadius: 8,
       width: 30,
