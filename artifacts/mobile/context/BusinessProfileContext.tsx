@@ -6,6 +6,11 @@ import React, {
   useEffect,
   useState,
 } from "react";
+import {
+  migrateFromAsyncStorage,
+  secureGet,
+  secureSet,
+} from "@/utils/secureStore";
 
 import { CurrencyCode, NumberFormat, isCurrencyCode } from "@/utils/currency";
 
@@ -61,7 +66,8 @@ export function BusinessProfileProvider({
   useEffect(() => {
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem(KEY);
+        // Migrate from plain AsyncStorage to SecureStore on first run.
+        let raw = await migrateFromAsyncStorage(KEY, KEY);
         if (raw) {
           const parsed = { ...DEFAULT_PROFILE, ...JSON.parse(raw) };
           if (!isCurrencyCode(parsed.defaultCurrency)) {
@@ -69,17 +75,18 @@ export function BusinessProfileProvider({
           }
           setProfile(parsed);
         } else {
-          // One-time migration from the old name/email-only profile.
-          const legacy = await AsyncStorage.getItem(LEGACY_KEY);
-          if (legacy) {
-            const l = JSON.parse(legacy);
+          // One-time migration from the old name/email-only profile (legacy AsyncStorage key).
+          const legacyRaw = await AsyncStorage.getItem(LEGACY_KEY);
+          if (legacyRaw) {
+            const l = JSON.parse(legacyRaw);
             const migrated: BusinessProfile = {
               ...DEFAULT_PROFILE,
               name: l.name ?? "",
               email: l.email ?? "",
             };
             setProfile(migrated);
-            await AsyncStorage.setItem(KEY, JSON.stringify(migrated));
+            await secureSet(KEY, JSON.stringify(migrated));
+            await AsyncStorage.removeItem(LEGACY_KEY);
           }
         }
       } catch {
@@ -92,7 +99,7 @@ export function BusinessProfileProvider({
   const saveProfile = useCallback((p: Partial<BusinessProfile>) => {
     setProfile((prev) => {
       const next = { ...prev, ...p };
-      AsyncStorage.setItem(KEY, JSON.stringify(next));
+      secureSet(KEY, JSON.stringify(next));
       return next;
     });
   }, []);

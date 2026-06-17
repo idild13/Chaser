@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, {
   createContext,
   useCallback,
@@ -9,6 +8,11 @@ import React, {
 } from "react";
 
 import { CurrencyCode, isCurrencyCode } from "@/utils/currency";
+import {
+  migrateFromAsyncStorage,
+  secureGet,
+  secureSet,
+} from "@/utils/secureStore";
 
 export type InvoiceStatus = "pending" | "paid" | "overdue";
 export type DiscountType = "percent" | "fixed";
@@ -366,7 +370,14 @@ export function InvoicesProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY).then((raw) => {
+    (async () => {
+      let raw: string | null;
+      try {
+        raw = await migrateFromAsyncStorage(STORAGE_KEY, STORAGE_KEY);
+      } catch {
+        raw = await secureGet(STORAGE_KEY);
+      }
+
       let list: Invoice[];
       if (raw) {
         try {
@@ -382,13 +393,13 @@ export function InvoicesProvider({ children }: { children: React.ReactNode }) {
       }
       setInvoices(list);
       // Persist normalized shape so the migration runs only once.
-      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+      await secureSet(STORAGE_KEY, JSON.stringify(list));
       setIsLoading(false);
-    });
+    })();
   }, []);
 
   const save = useCallback((next: Invoice[]) => {
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    secureSet(STORAGE_KEY, JSON.stringify(next));
   }, []);
 
   const addInvoice = useCallback(

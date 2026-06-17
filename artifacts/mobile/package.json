@@ -58,6 +58,7 @@
   "dependencies": {
     "expo-clipboard": "^56.0.4",
     "expo-print": "^56.0.4",
+    "expo-secure-store": "^56.0.4",
     "expo-sharing": "^56.0.18"
   }
 }
