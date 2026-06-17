@@ -16,8 +16,14 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AddInvoiceModal from "@/components/AddInvoiceModal";
 import { useColors } from "@/hooks/useColors";
-import { useIssuerProfile } from "@/hooks/useIssuerProfile";
-import { Invoice, useInvoices } from "@/context/InvoicesContext";
+import { useBusinessProfile } from "@/context/BusinessProfileContext";
+import {
+  Invoice,
+  computeInvoiceTotals,
+  getEffectiveStatus,
+  useInvoices,
+} from "@/context/InvoicesContext";
+import { CurrencyCode, formatMoney } from "@/utils/currency";
 import { sendEmailReminder } from "@/utils/sendEmailReminder";
 
 const AVATAR_COLORS = [
@@ -42,10 +48,6 @@ function initials(name: string) {
     .join("")
     .slice(0, 2)
     .toUpperCase();
-}
-
-function fmtCurrency(n: number) {
-  return "€" + n.toLocaleString("de-DE");
 }
 
 function daysUntil(dateStr: string) {
@@ -79,18 +81,21 @@ export default function DashboardScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { invoices, metrics, markPaid } = useInvoices();
-  const { profile } = useIssuerProfile();
+  const { profile } = useBusinessProfile();
   const [modalVisible, setModalVisible] = useState(false);
 
+  const fmt = (n: number, currency: CurrencyCode = metrics.currency) =>
+    formatMoney(n, currency, profile.numberFormat);
+
   const recent = [...invoices].slice(-4).reverse();
-  const overdue = invoices.filter((i) => i.status === "overdue");
-  const pending = invoices.filter((i) => i.status === "pending");
+  const overdue = invoices.filter((i) => getEffectiveStatus(i) === "overdue");
+  const pending = invoices.filter((i) => getEffectiveStatus(i) === "pending");
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
 
   async function copyReminder(inv: Invoice) {
     const days = daysAgo(inv.due);
-    const text = `Subject: Payment reminder — ${inv.invnum}\n\nHi,\n\nI hope this message finds you well. I wanted to follow up on invoice ${inv.invnum} for ${fmtCurrency(inv.amount)}, which was due ${days} day${days !== 1 ? "s" : ""} ago.\n\nCould you let me know when we can expect the payment?\n\nBest regards`;
+    const text = `Subject: Payment reminder — ${inv.invnum}\n\nHi,\n\nI hope this message finds you well. I wanted to follow up on invoice ${inv.invnum} for ${fmt(computeInvoiceTotals(inv).balanceDue, inv.currency)}, which was due ${days} day${days !== 1 ? "s" : ""} ago.\n\nCould you let me know when we can expect the payment?\n\nBest regards`;
     await Clipboard.setStringAsync(text);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   }
@@ -122,19 +127,19 @@ export default function DashboardScreen() {
         <View style={s.metricsGrid}>
           <MetricCard
             label="Total Earned"
-            value={fmtCurrency(metrics.totalEarned)}
+            value={fmt(metrics.totalEarned)}
             sub="this year"
             valueColor={colors.success}
           />
           <MetricCard
             label="Awaiting"
-            value={fmtCurrency(metrics.pending)}
+            value={fmt(metrics.pending)}
             sub={`${metrics.pendingCount} invoice${metrics.pendingCount !== 1 ? "s" : ""}`}
             valueColor={colors.warning}
           />
           <MetricCard
             label="Overdue"
-            value={fmtCurrency(metrics.overdue)}
+            value={fmt(metrics.overdue)}
             sub={`${metrics.overdueCount} invoice${metrics.overdueCount !== 1 ? "s" : ""}`}
             valueColor={colors.danger}
           />
@@ -172,8 +177,8 @@ export default function DashboardScreen() {
                       <Text style={s.invMeta}>{inv.invnum} · Due {inv.due}</Text>
                     </View>
                     <View style={s.invRight}>
-                      <Text style={s.invAmount}>{fmtCurrency(inv.amount)}</Text>
-                      <StatusBadge status={inv.status} />
+                      <Text style={s.invAmount}>{fmt(computeInvoiceTotals(inv).total, inv.currency)}</Text>
+                      <StatusBadge status={getEffectiveStatus(inv)} />
                     </View>
                   </View>
                 );
@@ -202,7 +207,7 @@ export default function DashboardScreen() {
                       <View style={{ flex: 1 }}>
                         <Text style={s.aiTitle}>{inv.client}</Text>
                         <Text style={s.aiSub}>
-                          {fmtCurrency(inv.amount)} · {days} day{days !== 1 ? "s" : ""} overdue
+                          {fmt(computeInvoiceTotals(inv).balanceDue, inv.currency)} · {days} day{days !== 1 ? "s" : ""} overdue
                         </Text>
                       </View>
                     </View>
@@ -216,7 +221,7 @@ export default function DashboardScreen() {
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={[s.aiBtn, { backgroundColor: colors.warningBg }]}
-                        onPress={() => sendEmailReminder(inv, profile.name)}
+                        onPress={() => sendEmailReminder(inv, profile.name, profile.numberFormat)}
                       >
                         <Feather name="mail" size={13} color={colors.warning} />
                         <Text style={[s.aiBtnText, { color: colors.warningText }]}>Send reminder</Text>
@@ -257,7 +262,7 @@ export default function DashboardScreen() {
                       <View style={{ flex: 1 }}>
                         <Text style={s.aiTitle}>{inv.client}</Text>
                         <Text style={s.aiSub}>
-                          {fmtCurrency(inv.amount)} · due{" "}
+                          {fmt(computeInvoiceTotals(inv).balanceDue, inv.currency)} · due{" "}
                           {days > 0
                             ? `in ${days} day${days !== 1 ? "s" : ""}`
                             : "today"}
@@ -275,7 +280,7 @@ export default function DashboardScreen() {
                       {isUrgent && (
                         <TouchableOpacity
                           style={[s.aiBtn, { backgroundColor: colors.warningBg }]}
-                          onPress={() => sendEmailReminder(inv, profile.name)}
+                          onPress={() => sendEmailReminder(inv, profile.name, profile.numberFormat)}
                         >
                           <Feather name="mail" size={13} color={colors.warning} />
                           <Text style={[s.aiBtnText, { color: colors.warningText }]}>Send reminder</Text>

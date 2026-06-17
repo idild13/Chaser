@@ -1,15 +1,55 @@
-import { Invoice } from "@/context/InvoicesContext";
+import {
+  Invoice,
+  computeInvoiceTotals,
+  getEffectiveStatus,
+} from "@/context/InvoicesContext";
+import {
+  BusinessProfile,
+  DEFAULT_PROFILE,
+} from "@/context/BusinessProfileContext";
+import { formatMoney } from "@/utils/currency";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import { Platform } from "react-native";
 
-function fmtCurrency(n: number) {
-  return "€" + n.toLocaleString("de-DE", { minimumFractionDigits: 2 });
+// ---- Security helpers ------------------------------------------------------
+// The PDF is also previewed as raw web HTML, so EVERY user-controlled field
+// must be escaped before interpolation to avoid HTML/script injection.
+
+function esc(s: unknown): string {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
-function fmtDate(dateStr: string) {
+function escMultiline(s: unknown): string {
+  return esc(s).replace(/\r?\n/g, "<br/>");
+}
+
+// Only allow safe schemes for the "Pay Now" link.
+function safeLink(url: string | undefined): string | null {
+  const u = (url ?? "").trim();
+  if (u.startsWith("https://") || u.startsWith("mailto:")) return u;
+  return null;
+}
+
+// Only allow inline data images or https for the logo.
+function safeImageSrc(uri: string | undefined): string | null {
+  const u = (uri ?? "").trim();
+  if (u.startsWith("data:image/") || u.startsWith("https://")) return u;
+  return null;
+}
+
+// ---- Formatting helpers ----------------------------------------------------
+
+function fmtDate(dateStr: string): string {
   try {
-    return new Date(dateStr).toLocaleDateString("en-GB", {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    return d.toLocaleDateString("en-GB", {
       day: "numeric",
       month: "long",
       year: "numeric",
@@ -19,28 +59,148 @@ function fmtDate(dateStr: string) {
   }
 }
 
-function statusLabel(status: Invoice["status"]) {
-  if (status === "paid") return "PAID";
-  if (status === "overdue") return "OVERDUE";
-  return "PENDING";
-}
+// ---- HTML builder ----------------------------------------------------------
 
-function statusColors(status: Invoice["status"]) {
-  if (status === "paid") return { bg: "#E8F5F0", text: "#085041", border: "#1D9E75" };
-  if (status === "overdue") return { bg: "#FEE2E2", text: "#991B1B", border: "#EF4444" };
-  return { bg: "#FEF3C7", text: "#78350F", border: "#F59E0B" };
-}
+function buildHTML(inv: Invoice, profile: BusinessProfile): string {
+  const totals = computeInvoiceTotals(inv);
+  const money = (v: number) => esc(formatMoney(v, inv.currency, profile.numberFormat));
 
-function buildHTML(inv: Invoice, issuerName: string, issuerEmail: string): string {
-  const sc = statusColors(inv.status);
-  const today = new Date().toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
-  const subtotal = inv.amount;
-  const tax = 0;
-  const total = subtotal + tax;
+  const today = fmtDate(new Date().toISOString());
+  const issued = fmtDate(inv.createdAt);
+  const due = fmtDate(inv.due);
+
+  const isOverdue = getEffectiveStatus(inv) === "overdue";
+
+  // --- Logo / brand (top-left) ---
+  const logoSrc = safeImageSrc(profile.logoUri);
+  const brandBlock = logoSrc
+    ? `<img class="logo" src="${esc(logoSrc)}" alt="Logo" />`
+    : `<div class="brand-name">${esc(profile.name || "Invoice")}</div>`;
+
+  // --- Overdue stamp ---
+  const overdueStamp = isOverdue
+    ? `<div class="stamp">OVERDUE</div>`
+    : "";
+
+  // --- Sender block (From) ---
+  const senderLines: string[] = [];
+  if (profile.name) senderLines.push(`<div class="party-name">${esc(profile.name)}</div>`);
+  if (profile.address)
+    senderLines.push(`<div class="party-detail">${escMultiline(profile.address)}</div>`);
+  if (profile.vatNumber)
+    senderLines.push(`<div class="party-detail">VAT: ${esc(profile.vatNumber)}</div>`);
+  if (profile.email)
+    senderLines.push(`<div class="party-detail">${esc(profile.email)}</div>`);
+  if (senderLines.length === 0)
+    senderLines.push(`<div class="party-name">Your Name</div>`);
+
+  // --- Client block (Bill To) ---
+  const clientLines: string[] = [];
+  clientLines.push(`<div class="party-name">${esc(inv.client || "Client")}</div>`);
+  if (inv.clientAddress)
+    clientLines.push(`<div class="party-detail">${escMultiline(inv.clientAddress)}</div>`);
+  if (inv.clientEmail)
+    clientLines.push(`<div class="party-detail">${esc(inv.clientEmail)}</div>`);
+
+  // --- PO number ---
+  const poRow = inv.poNumber
+    ? `<div class="date-row">
+         <span class="date-key">PO No.</span>
+         <span class="date-val">${esc(inv.poNumber)}</span>
+       </div>`
+    : "";
+
+  // --- Line items ---
+  const lineItems = inv.lineItems ?? [];
+  const lineRows = lineItems
+    .map((li) => {
+      const qty = Number(li.quantity) || 0;
+      const unit = Number(li.unitPrice) || 0;
+      const lineSubtotal = qty * unit;
+      return `
+        <tr>
+          <td>${esc(li.description || "—")}</td>
+          <td class="num">${esc(qty)}</td>
+          <td class="num">${money(unit)}</td>
+          <td class="num">${money(lineSubtotal)}</td>
+        </tr>`;
+    })
+    .join("");
+
+  // --- Totals rows ---
+  const discountLabel =
+    inv.discountType === "percent" && inv.discountValue
+      ? `Discount (${esc(inv.discountValue)}%)`
+      : "Discount";
+  const discountRow =
+    totals.discount > 0
+      ? `<div class="totals-row">
+           <span>${discountLabel}</span>
+           <span>-${money(totals.discount)}</span>
+         </div>`
+      : "";
+
+  const taxRate = Number(inv.taxRate) || 0;
+  const taxRow =
+    taxRate > 0
+      ? `<div class="totals-row">
+           <span>Tax (${esc(taxRate)}%)</span>
+           <span>${money(totals.tax)}</span>
+         </div>`
+      : "";
+
+  const partialRows =
+    totals.amountPaid > 0
+      ? `<div class="totals-row">
+           <span>Amount Paid</span>
+           <span>-${money(totals.amountPaid)}</span>
+         </div>
+         <div class="totals-row total">
+           <span class="label">Balance Due</span>
+           <span class="amount">${money(totals.balanceDue)}</span>
+         </div>`
+      : `<div class="totals-row total">
+           <span class="label">Total</span>
+           <span class="amount">${money(totals.total)}</span>
+         </div>`;
+
+  // --- Payment terms ---
+  const terms = inv.paymentTerms || profile.defaultPaymentTerms || "";
+  const termsBlock = terms
+    ? `<div class="info-block">
+         <div class="info-title">Payment Terms</div>
+         <div class="info-text">${esc(terms)}</div>
+       </div>`
+    : "";
+
+  // --- Bank / payment details ---
+  const bankBlock = profile.bankDetails
+    ? `<div class="info-block">
+         <div class="info-title">Payment Details</div>
+         <div class="info-text">${escMultiline(profile.bankDetails)}</div>
+       </div>`
+    : "";
+
+  // --- Payment notes (editable per-invoice, fallback default message) ---
+  const notesText =
+    inv.paymentNotes && inv.paymentNotes.trim().length > 0
+      ? escMultiline(inv.paymentNotes)
+      : `Please make payment by ${esc(due)}. Thank you for your business — it's a pleasure working with you.`;
+  const notesBlock = `<div class="notes">
+      <div class="notes-title">Notes</div>
+      <div class="notes-text">${notesText}</div>
+    </div>`;
+
+  // --- Late-fee note ---
+  const lateFeeNote = `<div class="late-fee">A late fee may be applied to balances unpaid after the due date.</div>`;
+
+  // --- Pay Now button ---
+  const link = safeLink(inv.payLink) ?? safeLink(profile.payLink);
+  const payNowButton = link
+    ? `<div class="pay-now-wrap">
+         <a class="pay-now" href="${esc(link)}">Pay Now</a>
+       </div>`
+    : "";
 
   return `
 <!DOCTYPE html>
@@ -62,6 +222,7 @@ function buildHTML(inv: Invoice, issuerName: string, issuerEmail: string): strin
       max-width: 680px;
       margin: 0 auto;
       padding: 48px 48px 64px;
+      position: relative;
     }
 
     /* HEADER */
@@ -70,42 +231,29 @@ function buildHTML(inv: Invoice, issuerName: string, issuerEmail: string): strin
       justify-content: space-between;
       align-items: flex-start;
       margin-bottom: 48px;
+      min-height: 44px;
     }
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .brand-icon {
-      width: 38px;
-      height: 38px;
-      background: #1D9E75;
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
+    .logo {
+      max-width: 180px;
+      max-height: 72px;
+      object-fit: contain;
     }
     .brand-name {
-      font-size: 20px;
+      font-size: 22px;
       font-weight: 700;
       color: #111827;
       letter-spacing: -0.3px;
     }
-    .brand-tagline {
-      font-size: 11px;
-      color: #6B7280;
-      margin-top: 1px;
-    }
-    .status-badge {
-      padding: 6px 14px;
-      border-radius: 20px;
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.8px;
-      background: ${sc.bg};
-      color: ${sc.text};
-      border: 1.5px solid ${sc.border};
+    .stamp {
+      border: 3px solid #EF4444;
+      color: #EF4444;
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: 2px;
+      padding: 6px 16px;
+      border-radius: 8px;
+      transform: rotate(8deg);
+      opacity: 0.85;
     }
 
     /* INVOICE TITLE */
@@ -131,9 +279,7 @@ function buildHTML(inv: Invoice, issuerName: string, issuerEmail: string): strin
       color: #1D9E75;
       letter-spacing: -0.5px;
     }
-    .invoice-dates {
-      text-align: right;
-    }
+    .invoice-dates { text-align: right; }
     .date-row {
       display: flex;
       justify-content: flex-end;
@@ -149,21 +295,11 @@ function buildHTML(inv: Invoice, issuerName: string, issuerEmail: string): strin
       min-width: 70px;
       text-align: right;
     }
-    .date-val {
-      font-size: 12px;
-      color: #111827;
-      font-weight: 500;
-    }
+    .date-val { font-size: 12px; color: #111827; font-weight: 500; }
 
     /* PARTIES */
-    .parties {
-      display: flex;
-      gap: 40px;
-      margin-bottom: 36px;
-    }
-    .party {
-      flex: 1;
-    }
+    .parties { display: flex; gap: 40px; margin-bottom: 36px; }
+    .party { flex: 1; }
     .party-label {
       font-size: 10px;
       font-weight: 700;
@@ -178,21 +314,11 @@ function buildHTML(inv: Invoice, issuerName: string, issuerEmail: string): strin
       color: #111827;
       margin-bottom: 2px;
     }
-    .party-detail {
-      font-size: 12px;
-      color: #6B7280;
-    }
+    .party-detail { font-size: 12px; color: #6B7280; }
 
     /* LINE ITEMS TABLE */
-    .table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-bottom: 24px;
-    }
-    .table thead tr {
-      background: #F9FAFB;
-      border-radius: 8px;
-    }
+    .table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+    .table thead tr { background: #F9FAFB; }
     .table th {
       padding: 10px 14px;
       font-size: 11px;
@@ -202,29 +328,18 @@ function buildHTML(inv: Invoice, issuerName: string, issuerEmail: string): strin
       color: #6B7280;
       text-align: left;
     }
-    .table th:last-child { text-align: right; }
+    .table th.num, .table td.num { text-align: right; }
     .table td {
       padding: 14px 14px;
       font-size: 13px;
       color: #111827;
       border-bottom: 1px solid #F3F4F6;
     }
-    .table td:last-child { text-align: right; font-weight: 600; }
-    .table .desc {
-      font-size: 11px;
-      color: #6B7280;
-      margin-top: 3px;
-    }
+    .table td.num { font-weight: 600; }
 
     /* TOTALS */
-    .totals {
-      display: flex;
-      justify-content: flex-end;
-      margin-bottom: 40px;
-    }
-    .totals-box {
-      width: 240px;
-    }
+    .totals { display: flex; justify-content: flex-end; margin-bottom: 36px; }
+    .totals-box { width: 260px; }
     .totals-row {
       display: flex;
       justify-content: space-between;
@@ -239,11 +354,20 @@ function buildHTML(inv: Invoice, issuerName: string, issuerEmail: string): strin
       margin-top: 4px;
     }
     .totals-row.total .label { font-size: 14px; font-weight: 700; color: #111827; }
-    .totals-row.total .amount {
-      font-size: 20px;
+    .totals-row.total .amount { font-size: 20px; font-weight: 700; color: #1D9E75; }
+
+    /* INFO BLOCKS */
+    .info-grid { display: flex; gap: 24px; margin-bottom: 24px; flex-wrap: wrap; }
+    .info-block { flex: 1; min-width: 220px; }
+    .info-title {
+      font-size: 11px;
       font-weight: 700;
-      color: #1D9E75;
+      color: #6B7280;
+      text-transform: uppercase;
+      letter-spacing: 0.7px;
+      margin-bottom: 4px;
     }
+    .info-text { font-size: 12px; color: #374151; }
 
     /* NOTES */
     .notes {
@@ -251,7 +375,7 @@ function buildHTML(inv: Invoice, issuerName: string, issuerEmail: string): strin
       border-left: 3px solid #1D9E75;
       border-radius: 4px;
       padding: 14px 16px;
-      margin-bottom: 40px;
+      margin-bottom: 16px;
     }
     .notes-title {
       font-size: 11px;
@@ -261,9 +385,22 @@ function buildHTML(inv: Invoice, issuerName: string, issuerEmail: string): strin
       letter-spacing: 0.7px;
       margin-bottom: 4px;
     }
-    .notes-text {
-      font-size: 12px;
-      color: #374151;
+    .notes-text { font-size: 12px; color: #374151; }
+
+    .late-fee { font-size: 11px; color: #9CA3AF; margin-bottom: 24px; }
+
+    /* PAY NOW */
+    .pay-now-wrap { text-align: center; margin-bottom: 36px; }
+    .pay-now {
+      display: inline-block;
+      background: #1D9E75;
+      color: #ffffff;
+      font-size: 14px;
+      font-weight: 700;
+      text-decoration: none;
+      padding: 12px 32px;
+      border-radius: 8px;
+      letter-spacing: 0.3px;
     }
 
     /* FOOTER */
@@ -274,15 +411,8 @@ function buildHTML(inv: Invoice, issuerName: string, issuerEmail: string): strin
       justify-content: space-between;
       align-items: center;
     }
-    .footer-brand {
-      font-size: 13px;
-      font-weight: 700;
-      color: #1D9E75;
-    }
-    .footer-note {
-      font-size: 11px;
-      color: #9CA3AF;
-    }
+    .footer-brand { font-size: 13px; font-weight: 700; color: #1D9E75; }
+    .footer-note { font-size: 11px; color: #9CA3AF; }
   </style>
 </head>
 <body>
@@ -290,35 +420,26 @@ function buildHTML(inv: Invoice, issuerName: string, issuerEmail: string): strin
 
     <!-- HEADER -->
     <div class="header">
-      <div class="brand">
-        <div class="brand-icon">
-          <svg width="20" height="20" viewBox="0 0 22 22" fill="none">
-            <path d="M11 5v12M7 9h8M7 13h6" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-        </div>
-        <div>
-          <div class="brand-name">Chaser</div>
-          <div class="brand-tagline">Invoice & Payment Chaser</div>
-        </div>
-      </div>
-      <div class="status-badge">${statusLabel(inv.status)}</div>
+      <div>${brandBlock}</div>
+      ${overdueStamp}
     </div>
 
     <!-- INVOICE NUMBER + DATES -->
     <div class="invoice-title-row">
       <div>
         <div class="invoice-label">Invoice</div>
-        <div class="invoice-number">${inv.invnum}</div>
+        <div class="invoice-number">${esc(inv.invnum)}</div>
       </div>
       <div class="invoice-dates">
         <div class="date-row">
           <span class="date-key">Issued</span>
-          <span class="date-val">${today}</span>
+          <span class="date-val">${esc(issued)}</span>
         </div>
         <div class="date-row">
           <span class="date-key">Due</span>
-          <span class="date-val">${fmtDate(inv.due)}</span>
+          <span class="date-val">${esc(due)}</span>
         </div>
+        ${poRow}
       </div>
     </div>
 
@@ -326,13 +447,11 @@ function buildHTML(inv: Invoice, issuerName: string, issuerEmail: string): strin
     <div class="parties">
       <div class="party">
         <div class="party-label">From</div>
-        <div class="party-name">${issuerName || "Your Name"}</div>
-        <div class="party-detail">${issuerEmail || "your@email.com"}</div>
+        ${senderLines.join("")}
       </div>
       <div class="party">
         <div class="party-label">Bill To</div>
-        <div class="party-name">${inv.client}</div>
-        <div class="party-detail">&nbsp;</div>
+        ${clientLines.join("")}
       </div>
     </div>
 
@@ -341,16 +460,13 @@ function buildHTML(inv: Invoice, issuerName: string, issuerEmail: string): strin
       <thead>
         <tr>
           <th>Description</th>
-          <th style="text-align:right">Amount</th>
+          <th class="num">Qty</th>
+          <th class="num">Unit Price</th>
+          <th class="num">Amount</th>
         </tr>
       </thead>
       <tbody>
-        <tr>
-          <td>
-            <div>${inv.desc || "Services rendered"}</div>
-          </td>
-          <td>${fmtCurrency(subtotal)}</td>
-        </tr>
+        ${lineRows}
       </tbody>
     </table>
 
@@ -359,32 +475,31 @@ function buildHTML(inv: Invoice, issuerName: string, issuerEmail: string): strin
       <div class="totals-box">
         <div class="totals-row">
           <span>Subtotal</span>
-          <span>${fmtCurrency(subtotal)}</span>
+          <span>${money(totals.subtotal)}</span>
         </div>
-        <div class="totals-row">
-          <span>Tax (0%)</span>
-          <span>${fmtCurrency(tax)}</span>
-        </div>
-        <div class="totals-row total">
-          <span class="label">Total</span>
-          <span class="amount">${fmtCurrency(total)}</span>
-        </div>
+        ${discountRow}
+        ${taxRow}
+        ${partialRows}
       </div>
+    </div>
+
+    <!-- INFO BLOCKS -->
+    <div class="info-grid">
+      ${termsBlock}
+      ${bankBlock}
     </div>
 
     <!-- NOTES -->
-    <div class="notes">
-      <div class="notes-title">Payment Notes</div>
-      <div class="notes-text">
-        Please make payment by ${fmtDate(inv.due)}.
-        Thank you for your business — it's a pleasure working with you.
-      </div>
-    </div>
+    ${notesBlock}
+    ${lateFeeNote}
+
+    <!-- PAY NOW -->
+    ${payNowButton}
 
     <!-- FOOTER -->
     <div class="footer">
-      <span class="footer-brand">Chaser</span>
-      <span class="footer-note">Generated ${today}</span>
+      <span class="footer-brand">${esc(profile.name || "Chaser")}</span>
+      <span class="footer-note">Generated ${esc(today)}</span>
     </div>
 
   </div>
@@ -393,12 +508,40 @@ function buildHTML(inv: Invoice, issuerName: string, issuerEmail: string): strin
   `.trim();
 }
 
+// ---- Public API ------------------------------------------------------------
+
+function resolveProfile(
+  profileOrName?: BusinessProfile | string,
+  legacyEmail?: string
+): BusinessProfile {
+  if (profileOrName && typeof profileOrName === "object") {
+    return { ...DEFAULT_PROFILE, ...profileOrName };
+  }
+  // Legacy (name, email) call shape — replaced by T005 callers.
+  return {
+    ...DEFAULT_PROFILE,
+    name: typeof profileOrName === "string" ? profileOrName : "",
+    email: legacyEmail ?? "",
+  };
+}
+
 export async function exportInvoicePDF(
   inv: Invoice,
-  issuerName = "",
-  issuerEmail = ""
+  businessProfile?: BusinessProfile
+): Promise<void>;
+// Legacy overload retained so existing callers typecheck until T005 wiring.
+export async function exportInvoicePDF(
+  inv: Invoice,
+  issuerName?: string,
+  issuerEmail?: string
+): Promise<void>;
+export async function exportInvoicePDF(
+  inv: Invoice,
+  profileOrName?: BusinessProfile | string,
+  legacyEmail?: string
 ): Promise<void> {
-  const html = buildHTML(inv, issuerName, issuerEmail);
+  const profile = resolveProfile(profileOrName, legacyEmail);
+  const html = buildHTML(inv, profile);
 
   if (Platform.OS === "web") {
     const win = window.open("", "_blank");

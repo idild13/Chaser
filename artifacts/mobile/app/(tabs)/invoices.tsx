@@ -17,8 +17,19 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AddInvoiceModal from "@/components/AddInvoiceModal";
 import IssuerProfileModal from "@/components/IssuerProfileModal";
 import { useColors } from "@/hooks/useColors";
-import { useIssuerProfile } from "@/hooks/useIssuerProfile";
-import { Invoice, InvoiceStatus, useInvoices } from "@/context/InvoicesContext";
+import {
+  BusinessProfile,
+  useBusinessProfile,
+} from "@/context/BusinessProfileContext";
+import {
+  Invoice,
+  InvoiceStatus,
+  computeInvoiceTotals,
+  getEffectiveStatus,
+  useInvoices,
+} from "@/context/InvoicesContext";
+import { formatMoney } from "@/utils/currency";
+import { confirmAction } from "@/utils/confirm";
 import { exportInvoicePDF } from "@/utils/generateInvoicePDF";
 import { sendEmailReminder } from "@/utils/sendEmailReminder";
 
@@ -46,8 +57,11 @@ function initials(name: string) {
     .toUpperCase();
 }
 
-function fmtCurrency(n: number) {
-  return "€" + n.toLocaleString("de-DE");
+function lineSummary(inv: Invoice): string {
+  const items = inv.lineItems ?? [];
+  if (items.length === 0) return inv.desc || inv.invnum;
+  const first = items[0].description || "Item";
+  return items.length > 1 ? `${first} +${items.length - 1} more` : first;
 }
 
 type Filter = "all" | InvoiceStatus;
@@ -63,7 +77,10 @@ export default function InvoicesScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { invoices, markPaid, deleteInvoice } = useInvoices();
-  const { profile, saveProfile } = useIssuerProfile();
+  const { profile, saveProfile, hasProfile } = useBusinessProfile();
+
+  const fmt = (n: number, currency: Invoice["currency"]) =>
+    formatMoney(n, currency, profile.numberFormat);
 
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
@@ -73,7 +90,7 @@ export default function InvoicesScreen() {
   const [profileModalVisible, setProfileModalVisible] = useState(false);
 
   const filtered = invoices
-    .filter((inv) => filter === "all" || inv.status === filter)
+    .filter((inv) => filter === "all" || getEffectiveStatus(inv) === filter)
     .filter(
       (inv) =>
         !search ||
@@ -86,21 +103,16 @@ export default function InvoicesScreen() {
 
   function handleDelete(inv: Invoice) {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Alert.alert(
-      "Delete Invoice",
-      `Delete ${inv.invnum} for ${inv.client}?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => {
-            deleteInvoice(inv.id);
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          },
-        },
-      ]
-    );
+    confirmAction({
+      title: "Delete Invoice",
+      message: `Delete ${inv.invnum} for ${inv.client}?`,
+      confirmText: "Delete",
+      destructive: true,
+      onConfirm: () => {
+        deleteInvoice(inv.id);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      },
+    });
   }
 
   function handleMarkPaid(inv: Invoice) {
@@ -109,18 +121,18 @@ export default function InvoicesScreen() {
   }
 
   async function handleExportPDF(inv: Invoice) {
-    if (!profile.name && !profile.email) {
+    if (!hasProfile) {
       setPendingExportInv(inv);
       setProfileModalVisible(true);
       return;
     }
-    await doExport(inv, profile.name, profile.email);
+    await doExport(inv, profile);
   }
 
-  async function doExport(inv: Invoice, name: string, email: string) {
+  async function doExport(inv: Invoice, prof: BusinessProfile) {
     setExportingId(inv.id);
     try {
-      await exportInvoicePDF(inv, name, email);
+      await exportInvoicePDF(inv, prof);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (err) {
       Alert.alert("Export Failed", "Could not generate the PDF. Please try again.");
@@ -135,7 +147,7 @@ export default function InvoicesScreen() {
     if (pendingExportInv) {
       const inv = pendingExportInv;
       setPendingExportInv(null);
-      await doExport(inv, p.name, p.email);
+      await doExport(inv, { ...profile, ...p });
     }
   }
 
@@ -147,7 +159,7 @@ export default function InvoicesScreen() {
         <View>
           <Text style={s.title}>Invoices</Text>
           <Text style={s.subtitle}>
-            {invoices.length} total · {invoices.filter((i) => i.status === "paid").length} paid
+            {invoices.length} total · {invoices.filter((i) => getEffectiveStatus(i) === "paid").length} paid
           </Text>
         </View>
         <TouchableOpacity
@@ -182,7 +194,7 @@ export default function InvoicesScreen() {
           const count =
             f.key === "all"
               ? invoices.length
-              : invoices.filter((i) => i.status === f.key).length;
+              : invoices.filter((i) => getEffectiveStatus(i) === f.key).length;
           return (
             <TouchableOpacity
               key={f.key}
@@ -246,11 +258,11 @@ export default function InvoicesScreen() {
                 </View>
                 <View style={s.invInfo}>
                   <Text style={s.invClient}>{inv.client}</Text>
-                  <Text style={s.invDesc} numberOfLines={1}>{inv.desc}</Text>
+                  <Text style={s.invDesc} numberOfLines={1}>{lineSummary(inv)}</Text>
                 </View>
                 <View style={s.invRightCol}>
-                  <Text style={s.invAmount}>{fmtCurrency(inv.amount)}</Text>
-                  <StatusBadge status={inv.status} />
+                  <Text style={s.invAmount}>{fmt(computeInvoiceTotals(inv).total, inv.currency)}</Text>
+                  <StatusBadge status={getEffectiveStatus(inv)} />
                 </View>
               </View>
 
@@ -268,7 +280,7 @@ export default function InvoicesScreen() {
                 </View>
 
                 <View style={s.invActions}>
-                  {inv.status !== "paid" && (
+                  {getEffectiveStatus(inv) !== "paid" && (
                     <TouchableOpacity
                       style={s.actionBtnPay}
                       onPress={() => handleMarkPaid(inv)}
@@ -279,10 +291,10 @@ export default function InvoicesScreen() {
                       </Text>
                     </TouchableOpacity>
                   )}
-                  {(inv.status === "overdue" || inv.status === "pending") && (
+                  {getEffectiveStatus(inv) !== "paid" && (
                     <TouchableOpacity
                       style={s.actionBtnEmail}
-                      onPress={() => sendEmailReminder(inv, profile.name)}
+                      onPress={() => sendEmailReminder(inv, profile.name, profile.numberFormat)}
                     >
                       <Feather name="mail" size={13} color={colors.warning} />
                     </TouchableOpacity>
@@ -318,7 +330,7 @@ export default function InvoicesScreen() {
 
       <IssuerProfileModal
         visible={profileModalVisible}
-        initial={profile}
+        initial={{ name: profile.name, email: profile.email }}
         onSave={handleProfileSave}
         onCancel={() => {
           setProfileModalVisible(false);
@@ -511,18 +523,16 @@ const styles = (colors: ReturnType<typeof useColors>) =>
       color: colors.foreground,
     },
     invCardBottom: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: colors.border,
       paddingTop: 10,
+      gap: 10,
     },
     invMeta: {
       flexDirection: "row",
       alignItems: "center",
       gap: 4,
-      flex: 1,
+      flexWrap: "wrap",
     },
     invMetaText: {
       fontSize: 12,
@@ -533,6 +543,7 @@ const styles = (colors: ReturnType<typeof useColors>) =>
       flexDirection: "row",
       gap: 6,
       alignItems: "center",
+      justifyContent: "flex-end",
     },
     actionBtnPay: {
       flexDirection: "row",

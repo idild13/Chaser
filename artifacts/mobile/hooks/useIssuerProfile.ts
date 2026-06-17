@@ -1,34 +1,19 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useCallback, useEffect, useState } from "react";
-
-const KEY = "fp_issuer_profile";
+import { useBusinessProfile } from "@/context/BusinessProfileContext";
 
 export interface IssuerProfile {
   name: string;
   email: string;
 }
 
+// Compatibility wrapper over the richer BusinessProfile context so existing
+// callers (invoices screen, IssuerProfileModal) keep working with name/email.
 export function useIssuerProfile() {
-  const [profile, setProfile] = useState<IssuerProfile>({ name: "", email: "" });
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    AsyncStorage.getItem(KEY).then((raw) => {
-      if (raw) {
-        try {
-          setProfile(JSON.parse(raw));
-        } catch {}
-      }
-      setLoaded(true);
-    });
-  }, []);
-
-  const saveProfile = useCallback((p: IssuerProfile) => {
-    setProfile(p);
-    AsyncStorage.setItem(KEY, JSON.stringify(p));
-  }, []);
-
-  const hasProfile = loaded && (profile.name.trim().length > 0 || profile.email.trim().length > 0);
-
-  return { profile, saveProfile, loaded, hasProfile };
+  const { profile, saveProfile, loaded, hasProfile } = useBusinessProfile();
+  return {
+    profile: { name: profile.name, email: profile.email } as IssuerProfile,
+    saveProfile: (p: IssuerProfile) =>
+      saveProfile({ name: p.name, email: p.email }),
+    loaded,
+    hasProfile,
+  };
 }

@@ -17,23 +17,80 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useColors } from "@/hooks/useColors";
-import { InvoiceStatus, useInvoices } from "@/context/InvoicesContext";
+import {
+  computeInvoiceTotals,
+  DiscountType,
+  Invoice,
+  InvoiceDraft,
+  InvoiceStatus,
+  LineItem,
+  useInvoices,
+} from "@/context/InvoicesContext";
+import { useBusinessProfile } from "@/context/BusinessProfileContext";
+import {
+  CURRENCIES,
+  CurrencyCode,
+  currencySymbol,
+  formatMoney,
+} from "@/utils/currency";
 
 interface Props {
   visible: boolean;
   onClose: () => void;
 }
 
+interface LineItemInput {
+  id: string;
+  description: string;
+  quantity: string;
+  unitPrice: string;
+}
+
+type TaxMode = "0" | "7" | "19" | "custom";
+type TermMode = "Net-15" | "Net-30" | "custom";
+
+function genLocalId(): string {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+function emptyLine(): LineItemInput {
+  return { id: genLocalId(), description: "", quantity: "1", unitPrice: "" };
+}
+
+function initialTaxMode(rate: number): TaxMode {
+  if (rate === 0) return "0";
+  if (rate === 7) return "7";
+  if (rate === 19) return "19";
+  return "custom";
+}
+
+function initialTermMode(term: string): TermMode {
+  if (term === "Net-15") return "Net-15";
+  if (term === "Net-30") return "Net-30";
+  return "custom";
+}
+
 export default function AddInvoiceModal({ visible, onClose }: Props) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { addInvoice, nextInvNum } = useInvoices();
+  const { profile } = useBusinessProfile();
 
   const [client, setClient] = useState("");
+  const [clientEmail, setClientEmail] = useState("");
+  const [clientAddress, setClientAddress] = useState("");
   const [invnum, setInvnum] = useState(nextInvNum);
-  const [amount, setAmount] = useState("");
+  const [poNumber, setPoNumber] = useState("");
   const [due, setDue] = useState("");
-  const [desc, setDesc] = useState("");
+  const [currency, setCurrency] = useState<CurrencyCode>("EUR");
+  const [lineItems, setLineItems] = useState<LineItemInput[]>([emptyLine()]);
+  const [taxMode, setTaxMode] = useState<TaxMode>("0");
+  const [taxCustom, setTaxCustom] = useState("");
+  const [discountType, setDiscountType] = useState<DiscountType>("percent");
+  const [discountValue, setDiscountValue] = useState("");
+  const [termMode, setTermMode] = useState<TermMode>("Net-30");
+  const [termCustom, setTermCustom] = useState("");
+  const [paymentNotes, setPaymentNotes] = useState("");
   const [status, setStatus] = useState<InvoiceStatus>("pending");
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -43,13 +100,32 @@ export default function AddInvoiceModal({ visible, onClose }: Props) {
     if (visible) {
       setInvnum(nextInvNum);
       setClient("");
-      setAmount("");
-      setDesc("");
+      setClientEmail("");
+      setClientAddress("");
+      setPoNumber("");
+      setLineItems([emptyLine()]);
+      setDiscountType("percent");
+      setDiscountValue("");
+      setPaymentNotes("");
       setStatus("pending");
       setErrors({});
+
+      setCurrency(profile.defaultCurrency || "EUR");
+
+      const tr = Number(profile.defaultTaxRate) || 0;
+      const tm = initialTaxMode(tr);
+      setTaxMode(tm);
+      setTaxCustom(tm === "custom" ? String(tr) : "");
+
+      const pt = profile.defaultPaymentTerms || "Net-30";
+      const ptm = initialTermMode(pt);
+      setTermMode(ptm);
+      setTermCustom(ptm === "custom" ? pt : "");
+
       const defaultDue = new Date();
       defaultDue.setDate(defaultDue.getDate() + 30);
       setDue(defaultDue.toISOString().split("T")[0]);
+
       Animated.spring(slideAnim, {
         toValue: 0,
         useNativeDriver: true,
@@ -63,15 +139,84 @@ export default function AddInvoiceModal({ visible, onClose }: Props) {
         useNativeDriver: true,
       }).start();
     }
-  }, [visible, nextInvNum]);
+  }, [visible, nextInvNum, profile]);
+
+  const effectiveTaxRate =
+    taxMode === "custom" ? parseFloat(taxCustom) || 0 : Number(taxMode);
+  const effectiveTerms =
+    termMode === "custom" ? termCustom.trim() : termMode;
+
+  function numericLineItems(): LineItem[] {
+    return lineItems.map((li) => ({
+      id: li.id,
+      description: li.description.trim(),
+      quantity: parseFloat(li.quantity) || 0,
+      unitPrice: parseFloat(li.unitPrice) || 0,
+    }));
+  }
+
+  function buildDraft(): InvoiceDraft {
+    const items = numericLineItems().filter(
+      (li) => li.description !== "" || li.unitPrice > 0
+    );
+    const draft: InvoiceDraft = {
+      client: client.trim(),
+      invnum: invnum.trim() || nextInvNum,
+      lineItems: items.length > 0 ? items : numericLineItems(),
+      currency,
+      taxRate: effectiveTaxRate,
+      due,
+      status,
+    };
+    if (clientEmail.trim()) draft.clientEmail = clientEmail.trim();
+    if (clientAddress.trim()) draft.clientAddress = clientAddress.trim();
+    if (poNumber.trim()) draft.poNumber = poNumber.trim();
+    const dv = parseFloat(discountValue) || 0;
+    if (dv > 0) {
+      draft.discountType = discountType;
+      draft.discountValue = dv;
+    }
+    if (effectiveTerms) draft.paymentTerms = effectiveTerms;
+    if (paymentNotes.trim()) draft.paymentNotes = paymentNotes.trim();
+    return draft;
+  }
+
+  const previewTotals = computeInvoiceTotals({
+    ...buildDraft(),
+    id: "preview",
+    createdAt: "",
+  } as Invoice);
 
   function validate() {
     const e: Record<string, string> = {};
     if (!client.trim()) e.client = "Client name is required";
-    const amt = parseFloat(amount);
-    if (!amount || isNaN(amt) || amt <= 0) e.amount = "Enter a valid amount";
+
+    const items = numericLineItems();
+    const anyValid = items.some(
+      (li) => li.description !== "" && li.quantity > 0 && li.unitPrice > 0
+    );
+    if (!anyValid)
+      e.lineItems = "Add at least one line item with description, qty and price";
+
     if (!due) e.due = "Due date is required";
     else if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) e.due = "Format: YYYY-MM-DD";
+
+    if (
+      clientEmail.trim() &&
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail.trim())
+    )
+      e.clientEmail = "Enter a valid email";
+
+    if (taxMode === "custom" && taxCustom.trim()) {
+      const t = parseFloat(taxCustom);
+      if (isNaN(t) || t < 0) e.tax = "Invalid tax rate";
+    }
+
+    if (discountValue.trim()) {
+      const dv = parseFloat(discountValue);
+      if (isNaN(dv) || dv < 0) e.discount = "Invalid discount";
+    }
+
     return e;
   }
 
@@ -82,16 +227,37 @@ export default function AddInvoiceModal({ visible, onClose }: Props) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       return;
     }
-    addInvoice({
-      client: client.trim(),
-      invnum: invnum.trim() || nextInvNum,
-      amount: parseFloat(amount),
-      due,
-      desc: desc.trim(),
-      status,
-    });
+    const draft = buildDraft();
+    const totals = computeInvoiceTotals({
+      ...draft,
+      id: "x",
+      createdAt: "",
+    } as Invoice);
+    draft.amountPaid = status === "paid" ? totals.total : 0;
+    addInvoice(draft);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     onClose();
+  }
+
+  function updateLineItem(
+    id: string,
+    field: keyof Omit<LineItemInput, "id">,
+    value: string
+  ) {
+    setLineItems((prev) =>
+      prev.map((li) => (li.id === id ? { ...li, [field]: value } : li))
+    );
+    setErrors((e) => ({ ...e, lineItems: "" }));
+  }
+
+  function addLine() {
+    setLineItems((prev) => [...prev, emptyLine()]);
+  }
+
+  function removeLine(id: string) {
+    setLineItems((prev) =>
+      prev.length > 1 ? prev.filter((li) => li.id !== id) : prev
+    );
   }
 
   const statusOptions: { value: InvoiceStatus; label: string }[] = [
@@ -100,6 +266,21 @@ export default function AddInvoiceModal({ visible, onClose }: Props) {
     { value: "overdue", label: "Overdue" },
   ];
 
+  const taxOptions: { value: TaxMode; label: string }[] = [
+    { value: "0", label: "0%" },
+    { value: "7", label: "7%" },
+    { value: "19", label: "19%" },
+    { value: "custom", label: "Custom" },
+  ];
+
+  const termOptions: { value: TermMode; label: string }[] = [
+    { value: "Net-15", label: "Net-15" },
+    { value: "Net-30", label: "Net-30" },
+    { value: "custom", label: "Custom" },
+  ];
+
+  const symbol = currencySymbol(currency);
+  const fmt = (n: number) => formatMoney(n, currency, profile.numberFormat);
   const s = styles(colors);
 
   return (
@@ -135,6 +316,7 @@ export default function AddInvoiceModal({ visible, onClose }: Props) {
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
               >
+                {/* Client */}
                 <View style={s.row}>
                   <View style={[s.field, { flex: 2 }]}>
                     <Text style={s.label}>Client Name</Text>
@@ -166,23 +348,49 @@ export default function AddInvoiceModal({ visible, onClose }: Props) {
                   </View>
                 </View>
 
+                <View style={s.field}>
+                  <Text style={s.label}>Client Email (optional)</Text>
+                  <TextInput
+                    style={[s.input, errors.clientEmail ? s.inputError : null]}
+                    placeholder="e.g. billing@acme.com"
+                    placeholderTextColor={colors.mutedForeground}
+                    value={clientEmail}
+                    onChangeText={(t) => {
+                      setClientEmail(t);
+                      setErrors((e) => ({ ...e, clientEmail: "" }));
+                    }}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                  />
+                  {!!errors.clientEmail && (
+                    <Text style={s.errorText}>{errors.clientEmail}</Text>
+                  )}
+                </View>
+
+                <View style={s.field}>
+                  <Text style={s.label}>Client Address (optional)</Text>
+                  <TextInput
+                    style={[s.input, s.textArea]}
+                    placeholder="Street, City, Country"
+                    placeholderTextColor={colors.mutedForeground}
+                    value={clientAddress}
+                    onChangeText={setClientAddress}
+                    multiline
+                    numberOfLines={2}
+                  />
+                </View>
+
                 <View style={s.row}>
                   <View style={[s.field, { flex: 1 }]}>
-                    <Text style={s.label}>Amount (€)</Text>
+                    <Text style={s.label}>PO Number (optional)</Text>
                     <TextInput
-                      style={[s.input, errors.amount ? s.inputError : null]}
-                      placeholder="1500"
+                      style={s.input}
+                      placeholder="e.g. PO-1024"
                       placeholderTextColor={colors.mutedForeground}
-                      value={amount}
-                      onChangeText={(t) => {
-                        setAmount(t);
-                        setErrors((e) => ({ ...e, amount: "" }));
-                      }}
-                      keyboardType="decimal-pad"
+                      value={poNumber}
+                      onChangeText={setPoNumber}
+                      autoCapitalize="characters"
                     />
-                    {!!errors.amount && (
-                      <Text style={s.errorText}>{errors.amount}</Text>
-                    )}
                   </View>
                   <View style={[s.field, { flex: 1 }]}>
                     <Text style={s.label}>Due Date</Text>
@@ -203,19 +411,274 @@ export default function AddInvoiceModal({ visible, onClose }: Props) {
                   </View>
                 </View>
 
+                {/* Currency */}
                 <View style={s.field}>
-                  <Text style={s.label}>Description</Text>
+                  <Text style={s.label}>Currency</Text>
+                  <View style={s.chipWrap}>
+                    {CURRENCIES.map((c) => (
+                      <TouchableOpacity
+                        key={c.code}
+                        style={[
+                          s.chip,
+                          currency === c.code && s.chipActive,
+                        ]}
+                        onPress={() => setCurrency(c.code)}
+                      >
+                        <Text
+                          style={[
+                            s.chipText,
+                            currency === c.code && s.chipTextActive,
+                          ]}
+                        >
+                          {c.symbol} {c.code}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+
+                {/* Line items */}
+                <View style={s.field}>
+                  <View style={s.sectionHeader}>
+                    <Text style={s.label}>Line Items</Text>
+                    <TouchableOpacity style={s.addLineBtn} onPress={addLine}>
+                      <Feather name="plus" size={14} color={colors.primary} />
+                      <Text style={s.addLineBtnText}>Add</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {lineItems.map((li, idx) => {
+                    const lineSub =
+                      (parseFloat(li.quantity) || 0) *
+                      (parseFloat(li.unitPrice) || 0);
+                    return (
+                      <View key={li.id} style={s.lineCard}>
+                        <View style={s.lineTopRow}>
+                          <Text style={s.lineIndex}>#{idx + 1}</Text>
+                          {lineItems.length > 1 && (
+                            <TouchableOpacity
+                              onPress={() => removeLine(li.id)}
+                              style={s.lineRemove}
+                            >
+                              <Feather
+                                name="trash-2"
+                                size={14}
+                                color={colors.danger}
+                              />
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                        <TextInput
+                          style={[s.input, s.lineDesc]}
+                          placeholder="Description"
+                          placeholderTextColor={colors.mutedForeground}
+                          value={li.description}
+                          onChangeText={(t) =>
+                            updateLineItem(li.id, "description", t)
+                          }
+                        />
+                        <View style={s.lineNumRow}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={s.miniLabel}>Qty</Text>
+                            <TextInput
+                              style={s.input}
+                              placeholder="1"
+                              placeholderTextColor={colors.mutedForeground}
+                              value={li.quantity}
+                              onChangeText={(t) =>
+                                updateLineItem(li.id, "quantity", t)
+                              }
+                              keyboardType="decimal-pad"
+                            />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={s.miniLabel}>
+                              Unit Price ({symbol})
+                            </Text>
+                            <TextInput
+                              style={s.input}
+                              placeholder="0.00"
+                              placeholderTextColor={colors.mutedForeground}
+                              value={li.unitPrice}
+                              onChangeText={(t) =>
+                                updateLineItem(li.id, "unitPrice", t)
+                              }
+                              keyboardType="decimal-pad"
+                            />
+                          </View>
+                        </View>
+                        <View style={s.lineSubRow}>
+                          <Text style={s.lineSubLabel}>Subtotal</Text>
+                          <Text style={s.lineSubValue}>{fmt(lineSub)}</Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                  {!!errors.lineItems && (
+                    <Text style={s.errorText}>{errors.lineItems}</Text>
+                  )}
+                </View>
+
+                {/* Tax */}
+                <View style={s.field}>
+                  <Text style={s.label}>Tax Rate</Text>
+                  <View style={s.chipWrap}>
+                    {taxOptions.map((opt) => (
+                      <TouchableOpacity
+                        key={opt.value}
+                        style={[
+                          s.chip,
+                          taxMode === opt.value && s.chipActive,
+                        ]}
+                        onPress={() => {
+                          setTaxMode(opt.value);
+                          setErrors((e) => ({ ...e, tax: "" }));
+                        }}
+                      >
+                        <Text
+                          style={[
+                            s.chipText,
+                            taxMode === opt.value && s.chipTextActive,
+                          ]}
+                        >
+                          {opt.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  {taxMode === "custom" && (
+                    <TextInput
+                      style={[
+                        s.input,
+                        { marginTop: 8 },
+                        errors.tax ? s.inputError : null,
+                      ]}
+                      placeholder="Tax rate (%)"
+                      placeholderTextColor={colors.mutedForeground}
+                      value={taxCustom}
+                      onChangeText={(t) => {
+                        setTaxCustom(t);
+                        setErrors((e) => ({ ...e, tax: "" }));
+                      }}
+                      keyboardType="decimal-pad"
+                    />
+                  )}
+                  {!!errors.tax && (
+                    <Text style={s.errorText}>{errors.tax}</Text>
+                  )}
+                </View>
+
+                {/* Discount */}
+                <View style={s.field}>
+                  <Text style={s.label}>Discount (optional)</Text>
+                  <View style={s.discountRow}>
+                    <View style={s.toggleGroup}>
+                      <TouchableOpacity
+                        style={[
+                          s.toggleBtn,
+                          discountType === "percent" && s.toggleBtnActive,
+                        ]}
+                        onPress={() => setDiscountType("percent")}
+                      >
+                        <Text
+                          style={[
+                            s.toggleText,
+                            discountType === "percent" && s.toggleTextActive,
+                          ]}
+                        >
+                          %
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          s.toggleBtn,
+                          discountType === "fixed" && s.toggleBtnActive,
+                        ]}
+                        onPress={() => setDiscountType("fixed")}
+                      >
+                        <Text
+                          style={[
+                            s.toggleText,
+                            discountType === "fixed" && s.toggleTextActive,
+                          ]}
+                        >
+                          {symbol}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                    <TextInput
+                      style={[
+                        s.input,
+                        { flex: 1 },
+                        errors.discount ? s.inputError : null,
+                      ]}
+                      placeholder={
+                        discountType === "percent" ? "e.g. 10" : "e.g. 50"
+                      }
+                      placeholderTextColor={colors.mutedForeground}
+                      value={discountValue}
+                      onChangeText={(t) => {
+                        setDiscountValue(t);
+                        setErrors((e) => ({ ...e, discount: "" }));
+                      }}
+                      keyboardType="decimal-pad"
+                    />
+                  </View>
+                  {!!errors.discount && (
+                    <Text style={s.errorText}>{errors.discount}</Text>
+                  )}
+                </View>
+
+                {/* Payment terms */}
+                <View style={s.field}>
+                  <Text style={s.label}>Payment Terms</Text>
+                  <View style={s.chipWrap}>
+                    {termOptions.map((opt) => (
+                      <TouchableOpacity
+                        key={opt.value}
+                        style={[
+                          s.chip,
+                          termMode === opt.value && s.chipActive,
+                        ]}
+                        onPress={() => setTermMode(opt.value)}
+                      >
+                        <Text
+                          style={[
+                            s.chipText,
+                            termMode === opt.value && s.chipTextActive,
+                          ]}
+                        >
+                          {opt.label}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  {termMode === "custom" && (
+                    <TextInput
+                      style={[s.input, { marginTop: 8 }]}
+                      placeholder="e.g. Due on receipt"
+                      placeholderTextColor={colors.mutedForeground}
+                      value={termCustom}
+                      onChangeText={setTermCustom}
+                    />
+                  )}
+                </View>
+
+                {/* Payment notes */}
+                <View style={s.field}>
+                  <Text style={s.label}>Payment Notes (optional)</Text>
                   <TextInput
                     style={[s.input, s.textArea]}
-                    placeholder="e.g. Website redesign — June 2026"
+                    placeholder="e.g. Please reference the invoice number on payment"
                     placeholderTextColor={colors.mutedForeground}
-                    value={desc}
-                    onChangeText={setDesc}
+                    value={paymentNotes}
+                    onChangeText={setPaymentNotes}
                     multiline
                     numberOfLines={2}
                   />
                 </View>
 
+                {/* Status */}
                 <View style={s.field}>
                   <Text style={s.label}>Status</Text>
                   <View style={s.statusRow}>
@@ -245,6 +708,37 @@ export default function AddInvoiceModal({ visible, onClose }: Props) {
                         </Text>
                       </TouchableOpacity>
                     ))}
+                  </View>
+                </View>
+
+                {/* Totals preview */}
+                <View style={s.totalsBox}>
+                  <View style={s.totalRow}>
+                    <Text style={s.totalLabel}>Subtotal</Text>
+                    <Text style={s.totalValue}>
+                      {fmt(previewTotals.subtotal)}
+                    </Text>
+                  </View>
+                  {previewTotals.discount > 0 && (
+                    <View style={s.totalRow}>
+                      <Text style={s.totalLabel}>Discount</Text>
+                      <Text style={s.totalValue}>
+                        −{fmt(previewTotals.discount)}
+                      </Text>
+                    </View>
+                  )}
+                  {effectiveTaxRate > 0 && (
+                    <View style={s.totalRow}>
+                      <Text style={s.totalLabel}>
+                        Tax ({effectiveTaxRate}%)
+                      </Text>
+                      <Text style={s.totalValue}>{fmt(previewTotals.tax)}</Text>
+                    </View>
+                  )}
+                  <View style={s.totalDivider} />
+                  <View style={s.totalRow}>
+                    <Text style={s.grandLabel}>Total</Text>
+                    <Text style={s.grandValue}>{fmt(previewTotals.total)}</Text>
                   </View>
                 </View>
 
@@ -332,6 +826,12 @@ const styles = (colors: ReturnType<typeof useColors>) =>
       textTransform: "uppercase",
       letterSpacing: 0.5,
     },
+    miniLabel: {
+      fontSize: 11,
+      fontFamily: "Inter_500Medium",
+      color: colors.mutedForeground,
+      marginBottom: 4,
+    },
     input: {
       backgroundColor: colors.muted,
       borderRadius: 10,
@@ -355,6 +855,174 @@ const styles = (colors: ReturnType<typeof useColors>) =>
       color: colors.danger,
       marginTop: 4,
       fontFamily: "Inter_400Regular",
+    },
+    chipWrap: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 8,
+    },
+    chip: {
+      paddingVertical: 8,
+      paddingHorizontal: 14,
+      borderRadius: 10,
+      backgroundColor: colors.muted,
+      borderWidth: 1.5,
+      borderColor: "transparent",
+    },
+    chipActive: {
+      borderColor: colors.primary,
+      backgroundColor: colors.successBg,
+    },
+    chipText: {
+      fontSize: 13,
+      fontFamily: "Inter_500Medium",
+      color: colors.mutedForeground,
+    },
+    chipTextActive: {
+      color: colors.primary,
+      fontFamily: "Inter_600SemiBold",
+    },
+    sectionHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    addLineBtn: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      paddingVertical: 4,
+      paddingHorizontal: 8,
+      borderRadius: 8,
+      backgroundColor: colors.successBg,
+    },
+    addLineBtnText: {
+      fontSize: 12,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.primary,
+    },
+    lineCard: {
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      padding: 12,
+      marginTop: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    lineTopRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: 8,
+    },
+    lineIndex: {
+      fontSize: 12,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.mutedForeground,
+    },
+    lineRemove: {
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      backgroundColor: colors.dangerBg,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    lineDesc: {
+      marginBottom: 10,
+    },
+    lineNumRow: {
+      flexDirection: "row",
+      gap: 10,
+    },
+    lineSubRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginTop: 10,
+    },
+    lineSubLabel: {
+      fontSize: 12,
+      fontFamily: "Inter_500Medium",
+      color: colors.mutedForeground,
+    },
+    lineSubValue: {
+      fontSize: 14,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.foreground,
+    },
+    discountRow: {
+      flexDirection: "row",
+      gap: 10,
+      alignItems: "center",
+    },
+    toggleGroup: {
+      flexDirection: "row",
+      borderRadius: 10,
+      backgroundColor: colors.muted,
+      padding: 3,
+      gap: 3,
+    },
+    toggleBtn: {
+      width: 44,
+      paddingVertical: 9,
+      borderRadius: 8,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    toggleBtnActive: {
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.primary,
+    },
+    toggleText: {
+      fontSize: 14,
+      fontFamily: "Inter_500Medium",
+      color: colors.mutedForeground,
+    },
+    toggleTextActive: {
+      color: colors.primary,
+      fontFamily: "Inter_700Bold",
+    },
+    totalsBox: {
+      backgroundColor: colors.background,
+      borderRadius: 12,
+      padding: 14,
+      marginTop: 4,
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    totalRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingVertical: 3,
+    },
+    totalLabel: {
+      fontSize: 13,
+      fontFamily: "Inter_400Regular",
+      color: colors.mutedForeground,
+    },
+    totalValue: {
+      fontSize: 13,
+      fontFamily: "Inter_500Medium",
+      color: colors.foreground,
+    },
+    totalDivider: {
+      height: 1,
+      backgroundColor: colors.border,
+      marginVertical: 8,
+    },
+    grandLabel: {
+      fontSize: 15,
+      fontFamily: "Inter_700Bold",
+      color: colors.foreground,
+    },
+    grandValue: {
+      fontSize: 17,
+      fontFamily: "Inter_700Bold",
+      color: colors.primary,
     },
     statusRow: {
       flexDirection: "row",

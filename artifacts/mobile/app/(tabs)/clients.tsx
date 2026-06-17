@@ -10,7 +10,14 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useColors } from "@/hooks/useColors";
-import { useInvoices } from "@/context/InvoicesContext";
+import { useBusinessProfile } from "@/context/BusinessProfileContext";
+import {
+  Invoice,
+  computeInvoiceTotals,
+  getEffectiveStatus,
+  useInvoices,
+} from "@/context/InvoicesContext";
+import { formatMoney } from "@/utils/currency";
 
 const AVATAR_COLORS = [
   { bg: "#EEEDFE", color: "#3C3489" },
@@ -36,14 +43,14 @@ function initials(name: string) {
     .toUpperCase();
 }
 
-function fmtCurrency(n: number) {
-  return "€" + n.toLocaleString("de-DE");
-}
-
 export default function ClientsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { clients, invoices } = useInvoices();
+  const { profile } = useBusinessProfile();
+
+  const fmt = (n: number, currency: Invoice["currency"]) =>
+    formatMoney(n, currency, profile.numberFormat);
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
 
@@ -99,7 +106,7 @@ export default function ClientsScreen() {
                   </Text>
                 </View>
                 <View style={s.clientRight}>
-                  <Text style={s.totalPaid}>{fmtCurrency(client.totalPaid)}</Text>
+                  <Text style={s.totalPaid}>{fmt(client.totalPaid, client.currency)}</Text>
                   <Text style={s.totalPaidLabel}>received</Text>
                 </View>
               </View>
@@ -118,7 +125,7 @@ export default function ClientsScreen() {
                   />
                 </View>
                 <Text style={s.progressLabel}>
-                  {Math.round(paidPct)}% collected of {fmtCurrency(client.totalBilled)}
+                  {Math.round(paidPct)}% collected of {fmt(client.totalBilled, client.currency)}
                 </Text>
               </View>
 
@@ -130,7 +137,7 @@ export default function ClientsScreen() {
                     color={colors.warning}
                   />
                   <Text style={s.outstandingText}>
-                    {fmtCurrency(client.outstanding)} outstanding
+                    {fmt(client.outstanding, client.currency)} outstanding
                   </Text>
                 </View>
               )}
@@ -140,9 +147,9 @@ export default function ClientsScreen() {
                   <View key={inv.id} style={s.miniInv}>
                     <Text style={s.miniInvNum}>{inv.invnum}</Text>
                     <Text style={s.miniInvDesc} numberOfLines={1}>
-                      {inv.desc || inv.invnum}
+                      {inv.lineItems?.[0]?.description || inv.invnum}
                     </Text>
-                    <StatusDot status={inv.status} />
+                    <StatusDot status={getEffectiveStatus(inv)} />
                   </View>
                 ))}
               </View>

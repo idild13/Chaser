@@ -1,10 +1,11 @@
-import { Invoice } from "@/context/InvoicesContext";
+import {
+  Invoice,
+  computeInvoiceTotals,
+  getEffectiveStatus,
+} from "@/context/InvoicesContext";
+import { NumberFormat, formatMoney } from "@/utils/currency";
 import * as Linking from "expo-linking";
-import { Alert } from "react-native";
-
-function fmtCurrency(n: number) {
-  return "€" + n.toLocaleString("de-DE", { minimumFractionDigits: 2 });
-}
+import { Alert, Platform } from "react-native";
 
 function daysAgo(dateStr: string) {
   return Math.max(
@@ -14,15 +15,19 @@ function daysAgo(dateStr: string) {
 }
 
 function daysUntil(dateStr: string) {
-  return Math.round(
-    (new Date(dateStr).getTime() - Date.now()) / 86400000
-  );
+  return Math.round((new Date(dateStr).getTime() - Date.now()) / 86400000);
 }
 
-function buildReminderEmail(inv: Invoice, issuerName: string): { subject: string; body: string } {
-  const amount = fmtCurrency(inv.amount);
+function buildReminderEmail(
+  inv: Invoice,
+  issuerName: string,
+  numberFormat: NumberFormat
+): { subject: string; body: string } {
+  const { total, balanceDue } = computeInvoiceTotals(inv);
+  const owed = balanceDue > 0 ? balanceDue : total;
+  const amount = formatMoney(owed, inv.currency, numberFormat);
 
-  if (inv.status === "overdue") {
+  if (getEffectiveStatus(inv) === "overdue") {
     const days = daysAgo(inv.due);
     const subject = `Payment Reminder — ${inv.invnum}`;
     const body = [
@@ -57,12 +62,23 @@ function buildReminderEmail(inv: Invoice, issuerName: string): { subject: string
 
 export async function sendEmailReminder(
   inv: Invoice,
-  issuerName = ""
+  issuerName = "",
+  numberFormat: NumberFormat = "comma-dot"
 ): Promise<void> {
-  const { subject, body } = buildReminderEmail(inv, issuerName);
+  const { subject, body } = buildReminderEmail(inv, issuerName, numberFormat);
 
   const params = new URLSearchParams({ subject, body });
-  const url = `mailto:?${params.toString()}`;
+  const recipient = inv.clientEmail?.trim() ?? "";
+  const url = `mailto:${encodeURIComponent(recipient)}?${params.toString()}`;
+
+  // On web, canOpenURL returns false for mailto and silently blocks the
+  // reminder. Open the mail client directly instead.
+  if (Platform.OS === "web") {
+    if (typeof window !== "undefined") {
+      window.open(url, "_self");
+    }
+    return;
+  }
 
   const canOpen = await Linking.canOpenURL(url);
   if (!canOpen) {

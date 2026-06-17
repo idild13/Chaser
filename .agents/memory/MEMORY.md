@@ -1,0 +1,1 @@
+- [Chaser invoice money/status invariants](chaser-invoice-invariants.md) — derive money via computeInvoiceTotals + formatMoney, status via getEffectiveStatus, scope sums to primaryCurrency, escape PDF HTML.
