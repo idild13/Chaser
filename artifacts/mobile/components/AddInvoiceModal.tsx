@@ -37,6 +37,8 @@ import {
 interface Props {
   visible: boolean;
   onClose: () => void;
+  editInvoice?: Invoice | null;
+  onSaved?: () => void;
 }
 
 interface LineItemInput {
@@ -70,11 +72,17 @@ function initialTermMode(term: string): TermMode {
   return "custom";
 }
 
-export default function AddInvoiceModal({ visible, onClose }: Props) {
+export default function AddInvoiceModal({
+  visible,
+  onClose,
+  editInvoice,
+  onSaved,
+}: Props) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { addInvoice, nextInvNum } = useInvoices();
+  const { addInvoice, updateInvoice, nextInvNum } = useInvoices();
   const { profile } = useBusinessProfile();
+  const isEdit = !!editInvoice;
 
   const [client, setClient] = useState("");
   const [clientEmail, setClientEmail] = useState("");
@@ -98,33 +106,70 @@ export default function AddInvoiceModal({ visible, onClose }: Props) {
 
   useEffect(() => {
     if (visible) {
-      setInvnum(nextInvNum);
-      setClient("");
-      setClientEmail("");
-      setClientAddress("");
-      setPoNumber("");
-      setLineItems([emptyLine()]);
-      setDiscountType("percent");
-      setDiscountValue("");
-      setPaymentNotes("");
-      setStatus("pending");
-      setErrors({});
+      if (editInvoice) {
+        setInvnum(editInvoice.invnum);
+        setClient(editInvoice.client);
+        setClientEmail(editInvoice.clientEmail ?? "");
+        setClientAddress(editInvoice.clientAddress ?? "");
+        setPoNumber(editInvoice.poNumber ?? "");
+        setLineItems(
+          editInvoice.lineItems && editInvoice.lineItems.length > 0
+            ? editInvoice.lineItems.map((li) => ({
+                id: li.id,
+                description: li.description,
+                quantity: String(li.quantity),
+                unitPrice: String(li.unitPrice),
+              }))
+            : [emptyLine()]
+        );
+        setCurrency(editInvoice.currency);
+        const etr = Number(editInvoice.taxRate) || 0;
+        const etm = initialTaxMode(etr);
+        setTaxMode(etm);
+        setTaxCustom(etm === "custom" ? String(etr) : "");
+        setDiscountType(editInvoice.discountType ?? "percent");
+        setDiscountValue(
+          editInvoice.discountValue && editInvoice.discountValue > 0
+            ? String(editInvoice.discountValue)
+            : ""
+        );
+        const ept = editInvoice.paymentTerms || "Net-30";
+        const eptm = initialTermMode(ept);
+        setTermMode(eptm);
+        setTermCustom(eptm === "custom" ? ept : "");
+        setPaymentNotes(editInvoice.paymentNotes ?? "");
+        setStatus(editInvoice.status);
+        setDue(editInvoice.due);
+        setErrors({});
+      } else {
+        setInvnum(nextInvNum);
+        setClient("");
+        setClientEmail("");
+        setClientAddress("");
+        setPoNumber("");
+        setLineItems([emptyLine()]);
+        setDiscountType("percent");
+        setDiscountValue("");
+        setPaymentNotes("");
+        setStatus("pending");
+        setErrors({});
 
-      setCurrency(profile.defaultCurrency || "EUR");
+        setCurrency(profile.defaultCurrency || "EUR");
 
-      const tr = Number(profile.defaultTaxRate) || 0;
-      const tm = initialTaxMode(tr);
-      setTaxMode(tm);
-      setTaxCustom(tm === "custom" ? String(tr) : "");
+        const tr = Number(profile.defaultTaxRate) || 0;
+        const tm = initialTaxMode(tr);
+        setTaxMode(tm);
+        setTaxCustom(tm === "custom" ? String(tr) : "");
 
-      const pt = profile.defaultPaymentTerms || "Net-30";
-      const ptm = initialTermMode(pt);
-      setTermMode(ptm);
-      setTermCustom(ptm === "custom" ? pt : "");
+        const pt = profile.defaultPaymentTerms || "Net-30";
+        const ptm = initialTermMode(pt);
+        setTermMode(ptm);
+        setTermCustom(ptm === "custom" ? pt : "");
 
-      const defaultDue = new Date();
-      defaultDue.setDate(defaultDue.getDate() + 30);
-      setDue(defaultDue.toISOString().split("T")[0]);
+        const defaultDue = new Date();
+        defaultDue.setDate(defaultDue.getDate() + 30);
+        setDue(defaultDue.toISOString().split("T")[0]);
+      }
 
       Animated.spring(slideAnim, {
         toValue: 0,
@@ -139,12 +184,16 @@ export default function AddInvoiceModal({ visible, onClose }: Props) {
         useNativeDriver: true,
       }).start();
     }
-  }, [visible, nextInvNum, profile]);
+  }, [visible, nextInvNum, profile, editInvoice]);
 
   const effectiveTaxRate =
     taxMode === "custom" ? parseFloat(taxCustom) || 0 : Number(taxMode);
   const effectiveTerms =
     termMode === "custom" ? termCustom.trim() : termMode;
+  const issueDate =
+    (editInvoice?.createdAt ?? "").split("T")[0] ||
+    (editInvoice?.createdAt ?? "");
+  const lockCurrency = isEdit && (editInvoice?.amountPaid ?? 0) > 0;
 
   function numericLineItems(): LineItem[] {
     return lineItems.map((li) => ({
@@ -220,7 +269,7 @@ export default function AddInvoiceModal({ visible, onClose }: Props) {
     return e;
   }
 
-  function handleAdd() {
+  function handleSubmit() {
     const e = validate();
     if (Object.keys(e).length > 0) {
       setErrors(e);
@@ -233,6 +282,31 @@ export default function AddInvoiceModal({ visible, onClose }: Props) {
       id: "x",
       createdAt: "",
     } as Invoice);
+
+    if (editInvoice) {
+      const dv = parseFloat(discountValue) || 0;
+      const patch: Partial<Invoice> = {
+        client: client.trim(),
+        clientEmail: clientEmail.trim() || undefined,
+        clientAddress: clientAddress.trim() || undefined,
+        poNumber: poNumber.trim() || undefined,
+        lineItems: draft.lineItems,
+        currency,
+        taxRate: effectiveTaxRate,
+        discountType: dv > 0 ? discountType : undefined,
+        discountValue: dv > 0 ? dv : undefined,
+        paymentTerms: effectiveTerms || undefined,
+        paymentNotes: paymentNotes.trim() || undefined,
+        due,
+        amountPaid: Math.min(editInvoice.amountPaid ?? 0, totals.total),
+      };
+      updateInvoice(editInvoice.id, patch);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      onSaved?.();
+      onClose();
+      return;
+    }
+
     draft.amountPaid = status === "paid" ? totals.total : 0;
     addInvoice(draft);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -309,7 +383,9 @@ export default function AddInvoiceModal({ visible, onClose }: Props) {
               <View style={s.handle} />
 
               <View style={s.header}>
-                <Text style={s.title}>New Invoice</Text>
+                <Text style={s.title}>
+                  {isEdit ? "Edit Invoice" : "New Invoice"}
+                </Text>
                 <TouchableOpacity onPress={onClose} style={s.closeBtn}>
                   <Feather name="x" size={20} color={colors.mutedForeground} />
                 </TouchableOpacity>
@@ -341,17 +417,47 @@ export default function AddInvoiceModal({ visible, onClose }: Props) {
                     )}
                   </View>
                   <View style={[s.field, { flex: 1 }]}>
-                    <Text style={s.label}>Invoice #</Text>
+                    <View style={s.lockLabelRow}>
+                      <Text style={[s.label, { marginBottom: 0 }]}>Invoice #</Text>
+                      {isEdit && (
+                        <Feather
+                          name="lock"
+                          size={11}
+                          color={colors.mutedForeground}
+                        />
+                      )}
+                    </View>
                     <TextInput
-                      style={s.input}
+                      style={[s.input, isEdit && s.inputLocked]}
                       placeholder={nextInvNum}
                       placeholderTextColor={colors.mutedForeground}
                       value={invnum}
                       onChangeText={setInvnum}
                       autoCapitalize="characters"
+                      editable={!isEdit}
                     />
                   </View>
                 </View>
+
+                {isEdit && (
+                  <View style={s.field}>
+                    <View style={s.lockLabelRow}>
+                      <Text style={[s.label, { marginBottom: 0 }]}>
+                        Issue Date
+                      </Text>
+                      <Feather
+                        name="lock"
+                        size={11}
+                        color={colors.mutedForeground}
+                      />
+                    </View>
+                    <TextInput
+                      style={[s.input, s.inputLocked]}
+                      value={issueDate}
+                      editable={false}
+                    />
+                  </View>
+                )}
 
                 <View style={s.field}>
                   <Text style={s.label}>Client Email (optional)</Text>
@@ -426,8 +532,12 @@ export default function AddInvoiceModal({ visible, onClose }: Props) {
                         style={[
                           s.chip,
                           currency === c.code && s.chipActive,
+                          lockCurrency && currency !== c.code && s.chipDisabled,
                         ]}
-                        onPress={() => setCurrency(c.code)}
+                        onPress={() => {
+                          if (!lockCurrency) setCurrency(c.code);
+                        }}
+                        disabled={lockCurrency}
                       >
                         <Text
                           style={[
@@ -440,6 +550,11 @@ export default function AddInvoiceModal({ visible, onClose }: Props) {
                       </TouchableOpacity>
                     ))}
                   </View>
+                  {lockCurrency && (
+                    <Text style={s.lockHint}>
+                      Currency is locked because a payment has been recorded.
+                    </Text>
+                  )}
                 </View>
 
                 {/* Line items */}
@@ -684,6 +799,7 @@ export default function AddInvoiceModal({ visible, onClose }: Props) {
                 </View>
 
                 {/* Status */}
+                {!isEdit && (
                 <View style={s.field}>
                   <Text style={s.label}>Status</Text>
                   <View style={s.statusRow}>
@@ -715,6 +831,7 @@ export default function AddInvoiceModal({ visible, onClose }: Props) {
                     ))}
                   </View>
                 </View>
+                )}
 
                 {/* Totals preview */}
                 <View style={s.totalsBox}>
@@ -747,8 +864,10 @@ export default function AddInvoiceModal({ visible, onClose }: Props) {
                   </View>
                 </View>
 
-                <TouchableOpacity style={s.addBtn} onPress={handleAdd}>
-                  <Text style={s.addBtnText}>Add Invoice</Text>
+                <TouchableOpacity style={s.addBtn} onPress={handleSubmit}>
+                  <Text style={s.addBtnText}>
+                    {isEdit ? "Save Changes" : "Add Invoice"}
+                  </Text>
                 </TouchableOpacity>
               </ScrollView>
             </Pressable>
@@ -864,6 +983,26 @@ const styles = (colors: ReturnType<typeof useColors>) =>
     textArea: {
       minHeight: 60,
       textAlignVertical: "top",
+    },
+    inputLocked: {
+      backgroundColor: colors.background,
+      color: colors.mutedForeground,
+      borderColor: colors.border,
+    },
+    lockLabelRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+      marginBottom: 6,
+    },
+    chipDisabled: {
+      opacity: 0.4,
+    },
+    lockHint: {
+      fontSize: 11,
+      color: colors.mutedForeground,
+      marginTop: 6,
+      fontFamily: "Inter_400Regular",
     },
     errorText: {
       fontSize: 11,

@@ -1,9 +1,10 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   FlatList,
   Platform,
   StyleSheet,
@@ -85,9 +86,33 @@ export default function InvoicesScreen() {
   const [filter, setFilter] = useState<Filter>("all");
   const [search, setSearch] = useState("");
   const [addModalVisible, setAddModalVisible] = useState(false);
+  const [editInvoice, setEditInvoice] = useState<Invoice | null>(null);
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [pendingExportInv, setPendingExportInv] = useState<Invoice | null>(null);
   const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const toastOpacity = useRef(new Animated.Value(0)).current;
+
+  function showToast(message: string) {
+    setToast(message);
+    toastOpacity.stopAnimation();
+    toastOpacity.setValue(0);
+    Animated.sequence([
+      Animated.timing(toastOpacity, {
+        toValue: 1,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+      Animated.delay(1700),
+      Animated.timing(toastOpacity, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (finished) setToast(null);
+    });
+  }
 
   const filtered = invoices
     .filter((inv) => filter === "all" || getEffectiveStatus(inv) === filter)
@@ -118,6 +143,15 @@ export default function InvoicesScreen() {
   function handleMarkPaid(inv: Invoice) {
     markPaid(inv.id);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  }
+
+  function handleEdit(inv: Invoice) {
+    if (getEffectiveStatus(inv) === "paid") {
+      showToast("Paid invoices cannot be edited");
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setEditInvoice(inv);
   }
 
   async function handleExportPDF(inv: Invoice) {
@@ -291,6 +325,28 @@ export default function InvoicesScreen() {
                       </Text>
                     </TouchableOpacity>
                   )}
+                  {getEffectiveStatus(inv) !== "paid" ? (
+                    <TouchableOpacity
+                      style={s.actionBtnEdit}
+                      onPress={() => handleEdit(inv)}
+                      accessibilityLabel={`Edit invoice ${inv.invnum}`}
+                    >
+                      <Feather name="edit-2" size={13} color={colors.foreground} />
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity
+                      style={[s.actionBtnEdit, s.actionBtnEditDisabled]}
+                      onPress={() => showToast("Paid invoices cannot be edited")}
+                      accessibilityLabel="Paid invoices cannot be edited"
+                      accessibilityState={{ disabled: true }}
+                    >
+                      <Feather
+                        name="edit-2"
+                        size={13}
+                        color={colors.mutedForeground}
+                      />
+                    </TouchableOpacity>
+                  )}
                   {getEffectiveStatus(inv) !== "paid" && (
                     <TouchableOpacity
                       style={s.actionBtnEmail}
@@ -324,8 +380,13 @@ export default function InvoicesScreen() {
       />
 
       <AddInvoiceModal
-        visible={addModalVisible}
-        onClose={() => setAddModalVisible(false)}
+        visible={addModalVisible || !!editInvoice}
+        editInvoice={editInvoice}
+        onClose={() => {
+          setAddModalVisible(false);
+          setEditInvoice(null);
+        }}
+        onSaved={() => showToast("Invoice updated")}
       />
 
       <IssuerProfileModal
@@ -338,6 +399,22 @@ export default function InvoicesScreen() {
         }}
         title="Your Invoice Details"
       />
+
+      {toast && (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            s.toast,
+            {
+              opacity: toastOpacity,
+              bottom:
+                insets.bottom + (Platform.OS === "web" ? 34 : 0) + 90,
+            },
+          ]}
+        >
+          <Text style={s.toastText}>{toast}</Text>
+        </Animated.View>
+      )}
     </View>
   );
 }
@@ -576,9 +653,36 @@ const styles = (colors: ReturnType<typeof useColors>) =>
       alignItems: "center",
       justifyContent: "center",
     },
+    actionBtnEdit: {
+      backgroundColor: colors.muted,
+      padding: 7,
+      borderRadius: 8,
+      width: 30,
+      height: 30,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    actionBtnEditDisabled: {
+      opacity: 0.45,
+    },
     actionBtnDel: {
       backgroundColor: colors.dangerBg,
       padding: 7,
       borderRadius: 8,
+    },
+    toast: {
+      position: "absolute",
+      alignSelf: "center",
+      backgroundColor: colors.foreground,
+      paddingHorizontal: 18,
+      paddingVertical: 12,
+      borderRadius: 12,
+      maxWidth: "90%",
+    },
+    toastText: {
+      color: colors.background,
+      fontSize: 14,
+      fontFamily: "Inter_600SemiBold",
+      textAlign: "center",
     },
   });

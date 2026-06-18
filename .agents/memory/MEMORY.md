@@ -1,3 +1,1 @@
-- [Chaser invoice money/status invariants](chaser-invoice-invariants.md) — derive money via computeInvoiceTotals + formatMoney, status via getEffectiveStatus, scope sums to primaryCurrency, escape PDF HTML.
-- [expo-secure-store web crash + RN sheet scroll](expo-secure-store-web.md) — expo-secure-store is native-only; guard with Platform.OS or it crashes web. RN ScrollView needs height-bounded ancestors (flex:1 + flexShrink:1).
-- [Stale pnpm hoist after dependency merge](pnpm-stale-hoist-after-merge.md) — a merged version bump can break the Expo bundle (worklets' bare require('@babel/generator')) while `pnpm install` says "up to date"; fix with `pnpm install --force`.
+- [Invoice currency vs amountPaid](money-currency-coupling.md) — amountPaid is currency-less; lock currency edits once a payment exists or you silently re-denominate it.
