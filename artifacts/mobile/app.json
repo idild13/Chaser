@@ -20,7 +20,9 @@
       "allowBackup": false
     },
     "web": {
-      "favicon": "./assets/images/icon.png"
+      "favicon": "./assets/images/icon.png",
+      "bundler": "metro",
+      "output": "static"
     },
     "plugins": [
       [

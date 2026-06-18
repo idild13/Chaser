@@ -14,6 +14,7 @@ const fs = require("fs");
 const path = require("path");
 
 const STATIC_ROOT = path.resolve(__dirname, "..", "static-build");
+const WEB_ROOT = path.join(STATIC_ROOT, "web");
 const TEMPLATE_PATH = path.resolve(__dirname, "templates", "landing-page.html");
 const basePath = (process.env.BASE_PATH || "/").replace(/\/+$/, "");
 
@@ -33,6 +34,7 @@ const MIME_TYPES = {
   ".ttf": "font/ttf",
   ".otf": "font/otf",
   ".map": "application/json",
+  ".webmanifest": "application/manifest+json",
 };
 
 function getAppName() {
@@ -104,6 +106,94 @@ function serveStaticFile(urlPath, res) {
   res.end(content);
 }
 
+function resolveSafe(root, urlPath) {
+  const safePath = path.normalize(urlPath).replace(/^(\.\.(\/|\\|$))+/, "");
+  const filePath = path.join(root, safePath);
+  if (filePath !== root && !filePath.startsWith(root + path.sep)) {
+    return null;
+  }
+  return filePath;
+}
+
+function sendFile(filePath, res, extraHeaders) {
+  const ext = path.extname(filePath).toLowerCase();
+  const contentType = MIME_TYPES[ext] || "application/octet-stream";
+  const content = fs.readFileSync(filePath);
+  res.writeHead(200, { "content-type": contentType, ...(extraHeaders || {}) });
+  res.end(content);
+}
+
+function webBuildExists() {
+  return fs.existsSync(path.join(WEB_ROOT, "index.html"));
+}
+
+// Serve native build artifacts (timestamped bundles/assets, ios/android
+// manifest dirs) exactly as before. Returns true if it handled the request.
+// The web/ subtree is intentionally excluded — that is serveWeb's job.
+function serveNativeFileIfExists(pathname, res) {
+  const filePath = resolveSafe(STATIC_ROOT, pathname);
+  if (!filePath) {
+    res.writeHead(403);
+    res.end("Forbidden");
+    return true;
+  }
+
+  if (filePath === WEB_ROOT || filePath.startsWith(WEB_ROOT + path.sep)) {
+    return false;
+  }
+
+  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+    sendFile(filePath, res);
+    return true;
+  }
+  return false;
+}
+
+function webHeadersFor(filePath, rel) {
+  const base = path.basename(filePath);
+  if (base === "sw.js") {
+    return { "cache-control": "no-cache", "service-worker-allowed": "/" };
+  }
+  if (base === "manifest.webmanifest" || base === "index.html") {
+    return { "cache-control": "no-cache" };
+  }
+  if (rel.startsWith("/_expo/")) {
+    return { "cache-control": "public, max-age=31536000, immutable" };
+  }
+  return {};
+}
+
+// Serve the web/PWA build with SPA fallback (extensionless routes -> index).
+function serveWeb(pathname, res) {
+  const rel = pathname === "/" ? "/index.html" : pathname;
+  const filePath = resolveSafe(WEB_ROOT, rel);
+  if (!filePath) {
+    res.writeHead(403);
+    res.end("Forbidden");
+    return;
+  }
+
+  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+    return sendFile(filePath, res, webHeadersFor(filePath, rel));
+  }
+
+  // Extensionless route: prefer the matching pre-rendered static HTML, then
+  // fall back to the app shell (index.html) so client-side routing can resolve.
+  if (!path.extname(pathname)) {
+    const htmlPath = resolveSafe(WEB_ROOT, `${rel}.html`);
+    if (htmlPath && fs.existsSync(htmlPath) && fs.statSync(htmlPath).isFile()) {
+      return sendFile(htmlPath, res, { "cache-control": "no-cache" });
+    }
+    const indexPath = path.join(WEB_ROOT, "index.html");
+    if (fs.existsSync(indexPath)) {
+      return sendFile(indexPath, res, { "cache-control": "no-cache" });
+    }
+  }
+
+  res.writeHead(404);
+  res.end("Not Found");
+}
+
 const landingPageTemplate = fs.readFileSync(TEMPLATE_PATH, "utf-8");
 const appName = getAppName();
 
@@ -115,17 +205,28 @@ const server = http.createServer((req, res) => {
     pathname = pathname.slice(basePath.length) || "/";
   }
 
+  // 1) Expo Go native manifest — MUST stay first so iOS/Android keep working.
   if (pathname === "/" || pathname === "/manifest") {
     const platform = req.headers["expo-platform"];
     if (platform === "ios" || platform === "android") {
       return serveManifest(platform, res);
     }
-
-    if (pathname === "/") {
-      return serveLandingPage(req, res, landingPageTemplate, appName);
-    }
   }
 
+  // 2) Native build artifacts (timestamped bundles/assets) — unchanged behavior.
+  if (pathname !== "/" && serveNativeFileIfExists(pathname, res)) {
+    return;
+  }
+
+  // 3) Web/PWA build for browsers — only when a web export is present.
+  if (webBuildExists()) {
+    return serveWeb(pathname, res);
+  }
+
+  // 4) Fallback: original landing page for browsers, else static 404.
+  if (pathname === "/") {
+    return serveLandingPage(req, res, landingPageTemplate, appName);
+  }
   serveStaticFile(pathname, res);
 });
 

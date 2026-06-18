@@ -1,1 +1,1 @@
-- [Invoice currency vs amountPaid](money-currency-coupling.md) — amountPaid is currency-less; lock currency edits once a payment exists or you silently re-denominate it.
+- [Expo PWA / web build](expo-pwa-web-build.md) — output:"static" (not "single") needed for +html.tsx PWA head/SW; mobile deploy is native Expo Go, serve.js must branch on expo-platform header first.

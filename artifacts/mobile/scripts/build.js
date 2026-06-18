@@ -191,6 +191,92 @@ async function startMetro(expoPublicDomain, expoPublicReplId) {
   process.exit(1);
 }
 
+// Fully stop the native-build Metro instance and wait for the process to close
+// before doing anything else. The web export below spins up its own bundler, so
+// the previous Metro (port 8081) must be gone to avoid port/cache contention.
+function stopMetro() {
+  return new Promise((resolve) => {
+    if (!metroProcess) return resolve();
+
+    const proc = metroProcess;
+    metroProcess = null;
+    let settled = false;
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+
+    proc.once("close", finish);
+    proc.once("exit", finish);
+    proc.kill("SIGTERM");
+
+    setTimeout(() => {
+      try {
+        proc.kill("SIGKILL");
+      } catch {}
+      finish();
+    }, 10_000);
+  });
+}
+
+// Produce the installable PWA web build. This is additive: it runs only after
+// the native iOS/Android bundles + manifests are complete, in a separate
+// process, and writes to static-build/web/. It must never affect the native
+// build, so callers treat its failure as best-effort.
+function buildWebExport(expoPublicDomain, expoPublicReplId) {
+  return new Promise((resolve, reject) => {
+    const outputDir = path.join(projectRoot, "static-build", "web");
+    if (fs.existsSync(outputDir)) {
+      fs.rmSync(outputDir, { recursive: true, force: true });
+    }
+
+    console.log("Exporting web (PWA) build...");
+    const env = {
+      ...process.env,
+      EXPO_PUBLIC_DOMAIN: expoPublicDomain,
+      EXPO_PUBLIC_REPL_ID: expoPublicReplId,
+    };
+
+    const proc = spawn(
+      "pnpm",
+      ["exec", "expo", "export", "--platform", "web", "--output-dir", outputDir],
+      {
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: false,
+        cwd: projectRoot,
+        env,
+      },
+    );
+
+    if (proc.stdout) {
+      proc.stdout.on("data", (data) => {
+        const output = data.toString().trim();
+        if (output) console.log(`[Web Export] ${output}`);
+      });
+    }
+    if (proc.stderr) {
+      proc.stderr.on("data", (data) => {
+        const output = data.toString().trim();
+        if (output) console.error(`[Web Export] ${output}`);
+      });
+    }
+
+    proc.on("error", reject);
+    proc.on("close", (code) => {
+      if (code === 0 && fs.existsSync(path.join(outputDir, "index.html"))) {
+        console.log("Web (PWA) build ready");
+        resolve();
+      } else {
+        reject(
+          new Error(`expo export --platform web failed (exit code ${code})`),
+        );
+      }
+    });
+  });
+}
+
 async function downloadFile(url, outputPath) {
   const controller = new AbortController();
   const fiveMinMS = 5 * 60 * 1_000;
@@ -556,11 +642,22 @@ async function main() {
   console.log("Updating manifests and creating landing page...");
   updateManifests(manifests, timestamp, baseUrl, assetsByHash);
 
-  console.log("Build complete! Deploy to:", baseUrl);
+  console.log("Native build complete! Deploy to:", baseUrl);
 
-  if (metroProcess) {
-    metroProcess.kill();
+  // Native iOS/Android build is done. Stop its Metro instance, then produce the
+  // web/PWA build in a separate process. Web export is best-effort: if it fails
+  // we keep the successful native build and fall back to the landing page.
+  await stopMetro();
+
+  try {
+    await buildWebExport(domain, expoPublicReplId);
+    console.log("Build complete (native + web/PWA).");
+  } catch (error) {
+    console.error(
+      `WARNING: web/PWA export failed, continuing with native build only: ${error.message}`,
+    );
   }
+
   process.exit(0);
 }
 
