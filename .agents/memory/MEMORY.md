@@ -1,1 +1,1 @@
-- [Expo PWA / web build](expo-pwa-web-build.md) — output:"static" (not "single") needed for +html.tsx PWA head/SW; mobile deploy is native Expo Go, serve.js must branch on expo-platform header first.
+- [Invoice paidAt lifecycle](invoice-paid-lifecycle.md) — every path that leaves an invoice effectively paid must stamp paidAt (else avg-days metric silently drops it); re-opening a balance must clear it.

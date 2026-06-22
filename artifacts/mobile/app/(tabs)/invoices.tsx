@@ -17,6 +17,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AddInvoiceModal from "@/components/AddInvoiceModal";
 import IssuerProfileModal from "@/components/IssuerProfileModal";
+import RecordPaymentModal from "@/components/RecordPaymentModal";
 import { useColors } from "@/hooks/useColors";
 import {
   BusinessProfile,
@@ -77,7 +78,7 @@ const FILTERS: { key: Filter; label: string }[] = [
 export default function InvoicesScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { invoices, markPaid, deleteInvoice } = useInvoices();
+  const { invoices, recordPayment, deleteInvoice } = useInvoices();
   const { profile, saveProfile, hasProfile } = useBusinessProfile();
 
   const fmt = (n: number, currency: Invoice["currency"]) =>
@@ -87,6 +88,7 @@ export default function InvoicesScreen() {
   const [search, setSearch] = useState("");
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [editInvoice, setEditInvoice] = useState<Invoice | null>(null);
+  const [paymentInvoice, setPaymentInvoice] = useState<Invoice | null>(null);
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [pendingExportInv, setPendingExportInv] = useState<Invoice | null>(null);
   const [profileModalVisible, setProfileModalVisible] = useState(false);
@@ -140,16 +142,17 @@ export default function InvoicesScreen() {
     });
   }
 
-  function handleMarkPaid(inv: Invoice) {
-    markPaid(inv.id);
+  function handleRecordPayment(amount: number) {
+    if (!paymentInvoice) return;
+    const settles =
+      amount >= computeInvoiceTotals(paymentInvoice).balanceDue - 0.005;
+    recordPayment(paymentInvoice.id, amount);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setPaymentInvoice(null);
+    showToast(settles ? "Invoice marked as paid" : "Payment recorded");
   }
 
   function handleEdit(inv: Invoice) {
-    if (getEffectiveStatus(inv) === "paid") {
-      showToast("Paid invoices cannot be edited");
-      return;
-    }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setEditInvoice(inv);
   }
@@ -281,6 +284,7 @@ export default function InvoicesScreen() {
         renderItem={({ item: inv }) => {
           const col = colorFor(inv.client);
           const isExporting = exportingId === inv.id;
+          const totals = computeInvoiceTotals(inv);
 
           return (
             <View style={s.invCard}>
@@ -295,7 +299,7 @@ export default function InvoicesScreen() {
                   <Text style={s.invDesc} numberOfLines={1}>{lineSummary(inv)}</Text>
                 </View>
                 <View style={s.invRightCol}>
-                  <Text style={s.invAmount}>{fmt(computeInvoiceTotals(inv).total, inv.currency)}</Text>
+                  <Text style={s.invAmount}>{fmt(totals.total, inv.currency)}</Text>
                   <StatusBadge status={getEffectiveStatus(inv)} />
                 </View>
               </View>
@@ -313,40 +317,47 @@ export default function InvoicesScreen() {
                   <Text style={s.invMetaText}>Due {inv.due}</Text>
                 </View>
 
+                {totals.amountPaid > 0 && totals.balanceDue > 0 && (
+                  <View style={s.partialRow}>
+                    <Feather
+                      name="trending-up"
+                      size={11}
+                      color={colors.primary}
+                    />
+                    <Text style={s.partialText}>
+                      {fmt(totals.amountPaid, inv.currency)} paid ·{" "}
+                      {fmt(totals.balanceDue, inv.currency)} due
+                    </Text>
+                  </View>
+                )}
+
                 <View style={s.invActions}>
                   {getEffectiveStatus(inv) !== "paid" && (
                     <TouchableOpacity
                       style={s.actionBtnPay}
-                      onPress={() => handleMarkPaid(inv)}
+                      onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        setPaymentInvoice(inv);
+                      }}
+                      accessibilityLabel={`Record payment for invoice ${inv.invnum}`}
                     >
-                      <Feather name="check" size={12} color={colors.success} />
+                      <Feather
+                        name="dollar-sign"
+                        size={12}
+                        color={colors.success}
+                      />
                       <Text style={[s.actionBtnText, { color: colors.success }]}>
-                        Paid
+                        Record
                       </Text>
                     </TouchableOpacity>
                   )}
-                  {getEffectiveStatus(inv) !== "paid" ? (
-                    <TouchableOpacity
-                      style={s.actionBtnEdit}
-                      onPress={() => handleEdit(inv)}
-                      accessibilityLabel={`Edit invoice ${inv.invnum}`}
-                    >
-                      <Feather name="edit-2" size={13} color={colors.foreground} />
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity
-                      style={[s.actionBtnEdit, s.actionBtnEditDisabled]}
-                      onPress={() => showToast("Paid invoices cannot be edited")}
-                      accessibilityLabel="Paid invoices cannot be edited"
-                      accessibilityState={{ disabled: true }}
-                    >
-                      <Feather
-                        name="edit-2"
-                        size={13}
-                        color={colors.mutedForeground}
-                      />
-                    </TouchableOpacity>
-                  )}
+                  <TouchableOpacity
+                    style={s.actionBtnEdit}
+                    onPress={() => handleEdit(inv)}
+                    accessibilityLabel={`Edit invoice ${inv.invnum}`}
+                  >
+                    <Feather name="edit-2" size={13} color={colors.foreground} />
+                  </TouchableOpacity>
                   {getEffectiveStatus(inv) !== "paid" && (
                     <TouchableOpacity
                       style={s.actionBtnEmail}
@@ -387,6 +398,14 @@ export default function InvoicesScreen() {
           setEditInvoice(null);
         }}
         onSaved={() => showToast("Invoice updated")}
+      />
+
+      <RecordPaymentModal
+        visible={!!paymentInvoice}
+        invoice={paymentInvoice}
+        numberFormat={profile.numberFormat}
+        onRecord={handleRecordPayment}
+        onClose={() => setPaymentInvoice(null)}
       />
 
       <IssuerProfileModal
@@ -662,8 +681,15 @@ const styles = (colors: ReturnType<typeof useColors>) =>
       alignItems: "center",
       justifyContent: "center",
     },
-    actionBtnEditDisabled: {
-      opacity: 0.45,
+    partialRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+    },
+    partialText: {
+      fontSize: 12,
+      fontFamily: "Inter_600SemiBold",
+      color: colors.primary,
     },
     actionBtnDel: {
       backgroundColor: colors.dangerBg,

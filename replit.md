@@ -39,9 +39,9 @@ Chaser is a local-only mobile app (Expo / React Native) that helps freelancers t
 ## Product
 
 - Dashboard with currency-scoped metrics (total earned, awaiting, overdue, avg. payment days) and a "Chase Priority" list with one-tap mark-paid / send-reminder / copy-reminder.
-- Full invoice list with search, status filters, PDF export, and email reminders.
+- Full invoice list with search, status filters, PDF export, and email reminders. Record full or partial payments through a payment sheet (shows total / already-paid / balance due, prefilled to the balance); cards show a "X paid · Y due" note while a balance remains. Any invoice — including fully paid ones — can be edited (editing that re-opens a balance clears the stale `paidAt`).
 - Clients view rolling up billed / received / outstanding per client.
-- My Info tab for the business profile (logo, address, VAT, bank details, Pay Now link, default currency / tax / terms, number format).
+- My Info tab for the business profile (logo, address, VAT, bank details, Pay Now link, default currency / tax / terms, number format), with inline validation (business name required; email must be valid when present).
 - Professional invoice schema: multiple line items, currency, tax rate, discount (percent/fixed), payment terms, notes, PO number, client email/address, and partial payments (`amountPaid` / `balanceDue`).
 
 ## User preferences
@@ -52,6 +52,7 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 - After changing the invoice schema, update `normalizeInvoice` so legacy/persisted invoices still load without data loss, and validate enum-like fields (e.g. currency via `isCurrencyCode`) at the load boundary.
 - When adding any amount to the UI or PDF, decide deliberately between `total` (the invoice's value) and `balanceDue` (what's still owed). Chase/reminder surfaces use `balanceDue`; the invoice's headline value uses `total`.
+- Any code path that leaves an invoice effectively paid (`balanceDue <= ~0.005`) must stamp `paidAt` (`existing ?? new Date().toISOString()`); a path that re-opens a balance must clear it (`paidAt: undefined`). The avg-payment-days metric counts only invoices with a `paidAt`, so a missed stamp silently drops a paid invoice from the metric.
 
 ## Pointers
 

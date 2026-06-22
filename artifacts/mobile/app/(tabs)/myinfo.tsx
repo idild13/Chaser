@@ -51,6 +51,7 @@ export default function MyInfoScreen() {
     profile.numberFormat
   );
   const [saved, setSaved] = useState(false);
+  const [errors, setErrors] = useState<{ name?: string; email?: string }>({});
 
   const hydrated = useRef(false);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -106,6 +107,17 @@ export default function MyInfoScreen() {
   }
 
   function handleSave() {
+    const e: { name?: string; email?: string } = {};
+    if (!name.trim()) e.name = "Business name is required";
+    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()))
+      e.email = "Enter a valid email address";
+    if (Object.keys(e).length > 0) {
+      setErrors(e);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      return;
+    }
+    setErrors({});
+
     const rate = parseFloat(defaultTaxRate);
     saveProfile({
       name: name.trim(),
@@ -196,28 +208,44 @@ export default function MyInfoScreen() {
           <View style={s.field}>
             <Text style={s.label}>Business / Your Name</Text>
             <TextInput
-              style={s.input}
+              style={[s.input, errors.name ? s.inputError : null]}
               placeholder="e.g. Jane Smith Studio"
               placeholderTextColor={colors.mutedForeground}
               value={name}
-              onChangeText={setName}
+              onChangeText={(t) => {
+                setName(t);
+                if (errors.name) setErrors((e) => ({ ...e, name: undefined }));
+              }}
               autoCapitalize="words"
               testID="myinfo-name"
             />
+            {!!errors.name && (
+              <Text style={s.errorText} testID="myinfo-name-error">
+                {errors.name}
+              </Text>
+            )}
           </View>
 
           <View style={s.field}>
             <Text style={s.label}>Email</Text>
             <TextInput
-              style={s.input}
+              style={[s.input, errors.email ? s.inputError : null]}
               placeholder="e.g. jane@studio.com"
               placeholderTextColor={colors.mutedForeground}
               value={email}
-              onChangeText={setEmail}
+              onChangeText={(t) => {
+                setEmail(t);
+                if (errors.email) setErrors((e) => ({ ...e, email: undefined }));
+              }}
               keyboardType="email-address"
               autoCapitalize="none"
               testID="myinfo-email"
             />
+            {!!errors.email && (
+              <Text style={s.errorText} testID="myinfo-email-error">
+                {errors.email}
+              </Text>
+            )}
           </View>
 
           <View style={s.field}>
@@ -502,6 +530,15 @@ const styles = (colors: ReturnType<typeof useColors>) =>
     textArea: {
       minHeight: 72,
       textAlignVertical: "top",
+    },
+    inputError: {
+      borderColor: colors.danger,
+    },
+    errorText: {
+      fontSize: 12,
+      fontFamily: "Inter_500Medium",
+      color: colors.danger,
+      marginTop: 4,
     },
     hint: {
       fontSize: 11,

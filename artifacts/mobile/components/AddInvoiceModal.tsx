@@ -285,6 +285,8 @@ export default function AddInvoiceModal({
 
     if (editInvoice) {
       const dv = parseFloat(discountValue) || 0;
+      const newPaid = Math.min(editInvoice.amountPaid ?? 0, totals.total);
+      const stillPaid = totals.total > 0 && newPaid >= totals.total - 0.005;
       const patch: Partial<Invoice> = {
         client: client.trim(),
         clientEmail: clientEmail.trim() || undefined,
@@ -298,7 +300,10 @@ export default function AddInvoiceModal({
         paymentTerms: effectiveTerms || undefined,
         paymentNotes: paymentNotes.trim() || undefined,
         due,
-        amountPaid: Math.min(editInvoice.amountPaid ?? 0, totals.total),
+        amountPaid: newPaid,
+        paidAt: stillPaid
+          ? editInvoice.paidAt ?? new Date().toISOString()
+          : undefined,
       };
       updateInvoice(editInvoice.id, patch);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -307,7 +312,12 @@ export default function AddInvoiceModal({
       return;
     }
 
-    draft.amountPaid = status === "paid" ? totals.total : 0;
+    if (status === "paid") {
+      draft.amountPaid = totals.total;
+      draft.paidAt = new Date().toISOString();
+    } else {
+      draft.amountPaid = 0;
+    }
     addInvoice(draft);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     onClose();
