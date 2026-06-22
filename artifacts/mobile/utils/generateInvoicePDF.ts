@@ -10,6 +10,7 @@ import {
 import { formatMoney } from "@/utils/currency";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
+import * as FileSystem from "expo-file-system/legacy";
 import { Platform } from "react-native";
 
 // ---- Security helpers ------------------------------------------------------
@@ -59,6 +60,22 @@ function fmtDate(dateStr: string): string {
   }
 }
 
+// Build a recognizable, filesystem-safe base name like
+// "Brightwave_Media_Group_INV-001_2026-07-22" from the client, invoice number,
+// and due date. Used for both the exported file name and the HTML <title>
+// (browsers use the document title as the default "Save as PDF" file name).
+function invoiceFileBaseName(inv: Invoice): string {
+  const sanitize = (s: unknown) =>
+    String(s ?? "")
+      .replace(/[^a-zA-Z0-9-]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+  const parts = [inv.client, inv.invnum, inv.due]
+    .map(sanitize)
+    .filter((p) => p.length > 0);
+  const base = parts.join("_").slice(0, 100);
+  return base || `invoice_${sanitize(inv.invnum) || "export"}`;
+}
+
 // ---- HTML builder ----------------------------------------------------------
 
 function buildHTML(inv: Invoice, profile: BusinessProfile): string {
@@ -68,6 +85,7 @@ function buildHTML(inv: Invoice, profile: BusinessProfile): string {
   const today = fmtDate(new Date().toISOString());
   const issued = fmtDate(inv.createdAt);
   const due = fmtDate(inv.due);
+  const fileBase = invoiceFileBaseName(inv);
 
   const isOverdue = getEffectiveStatus(inv) === "overdue";
 
@@ -208,6 +226,7 @@ function buildHTML(inv: Invoice, profile: BusinessProfile): string {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${esc(fileBase)}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -305,7 +324,7 @@ function buildHTML(inv: Invoice, profile: BusinessProfile): string {
       font-weight: 700;
       letter-spacing: 1.2px;
       text-transform: uppercase;
-      color: #9CA3AF;
+      color: #6B7280;
       margin-bottom: 8px;
     }
     .party-name {
@@ -387,7 +406,7 @@ function buildHTML(inv: Invoice, profile: BusinessProfile): string {
     }
     .notes-text { font-size: 12px; color: #374151; }
 
-    .late-fee { font-size: 11px; color: #9CA3AF; margin-bottom: 24px; }
+    .late-fee { font-size: 11px; color: #6B7280; margin-bottom: 24px; }
 
     /* PAY NOW */
     .pay-now-wrap { text-align: center; margin-bottom: 36px; }
@@ -412,7 +431,7 @@ function buildHTML(inv: Invoice, profile: BusinessProfile): string {
       align-items: center;
     }
     .footer-brand { font-size: 13px; font-weight: 700; color: #1D9E75; }
-    .footer-note { font-size: 11px; color: #9CA3AF; }
+    .footer-note { font-size: 11px; color: #6B7280; }
   </style>
 </head>
 <body>
@@ -556,9 +575,25 @@ export async function exportInvoicePDF(
 
   const { uri } = await Print.printToFileAsync({ html, base64: false });
 
+  // Print writes a UUID-named temp file; copy it to a recognizable name so the
+  // share sheet / saved file reads "Client_Invoice_DueDate.pdf".
+  let shareUri = uri;
+  try {
+    const dir = FileSystem.cacheDirectory;
+    if (dir) {
+      const dest = `${dir}${invoiceFileBaseName(inv)}.pdf`;
+      await FileSystem.deleteAsync(dest, { idempotent: true });
+      await FileSystem.copyAsync({ from: uri, to: dest });
+      shareUri = dest;
+    }
+  } catch {
+    // Fall back to the original temp file if the rename fails.
+    shareUri = uri;
+  }
+
   const canShare = await Sharing.isAvailableAsync();
   if (canShare) {
-    await Sharing.shareAsync(uri, {
+    await Sharing.shareAsync(shareUri, {
       mimeType: "application/pdf",
       dialogTitle: `Invoice ${inv.invnum} — ${inv.client}`,
       UTI: "com.adobe.pdf",

@@ -67,9 +67,12 @@ export async function sendEmailReminder(
 ): Promise<void> {
   const { subject, body } = buildReminderEmail(inv, issuerName, numberFormat);
 
-  const params = new URLSearchParams({ subject, body });
   const recipient = inv.clientEmail?.trim() ?? "";
-  const url = `mailto:${encodeURIComponent(recipient)}?${params.toString()}`;
+  // Build the query manually: URLSearchParams encodes spaces as "+", which many
+  // mail clients (e.g. Apple Mail) render literally instead of as spaces.
+  // encodeURIComponent encodes spaces as %20, which decodes correctly.
+  const query = `subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  const url = `mailto:${encodeURIComponent(recipient)}?${query}`;
 
   // On web, canOpenURL returns false for mailto and silently blocks the
   // reminder. Open the mail client directly instead.

@@ -14,15 +14,15 @@ Chaser is a local-only mobile app (Expo / React Native) that helps freelancers t
 - Expo / React Native + expo-router (file-based routing under `artifacts/mobile/app`)
 - TypeScript 5.9, pnpm workspaces, Node.js 24
 - Local persistence: `@react-native-async-storage/async-storage`
-- PDF: `expo-print` + `expo-sharing`; clipboard: `expo-clipboard`; logo upload: `expo-image-picker`
+- PDF: `expo-print` + `expo-sharing` (+ `expo-file-system` to rename the export before sharing); clipboard: `expo-clipboard`; logo upload: `expo-image-picker`
 
 ## Where things live (artifacts/mobile)
 
 - `context/InvoicesContext.tsx` — **source of truth** for the invoice data model: `Invoice`/`LineItem` types (incl. `paidAt`, the ISO timestamp set when an invoice becomes fully paid), `normalizeInvoice` (legacy migration), `computeInvoiceTotals`, `getEffectiveStatus`, `isPastDue`, `daysToPay`, currency-scoped `metrics`/`clients` (avg-days-to-pay is derived from `createdAt`→`paidAt`), `primaryCurrency`, and mutations (`addInvoice`, `markPaid`, `recordPayment`, `updateInvoice`, `deleteInvoice`).
 - `context/BusinessProfileContext.tsx` — reactive business profile (name, address, VAT, bank details, Pay Now link, logo, defaults). Migrates legacy `fp_issuer_profile`.
 - `utils/currency.ts` — `CURRENCIES`, `formatMoney(amount, code, numberFormat)`, `currencySymbol`, `isCurrencyCode` (currency validation at data boundaries).
-- `utils/generateInvoicePDF.ts` — `exportInvoicePDF(invoice, businessProfile)` builds the invoice HTML and shares it as a PDF.
-- `utils/sendEmailReminder.ts` — prefilled mailto reminder using the invoice's client email + currency.
+- `utils/generateInvoicePDF.ts` — `exportInvoicePDF(invoice, businessProfile)` builds the invoice HTML and shares it as a PDF. Native export copies the temp file to a recognizable `Client_Invoice_DueDate.pdf` name (via `invoiceFileBaseName`) before sharing; the HTML `<title>` carries the same base so browser "Save as PDF" suggests it too.
+- `utils/sendEmailReminder.ts` — prefilled mailto reminder using the invoice's client email + currency. Query is built with `encodeURIComponent` (NOT `URLSearchParams`, which would render spaces as literal "+").
 - `components/AddInvoiceModal.tsx` — full invoice creation form (line items, currency, tax, discount, terms, addresses).
 - `app/(tabs)/` — `index.tsx` (Dashboard), `invoices.tsx`, `clients.tsx`, `myinfo.tsx` (business profile), `_layout.tsx` (tab bar).
 
