@@ -343,12 +343,9 @@ export default function InvoicesScreen() {
                     >
                       <Feather
                         name="dollar-sign"
-                        size={12}
+                        size={14}
                         color={colors.success}
                       />
-                      <Text style={[s.actionBtnText, { color: colors.success }]}>
-                        Record
-                      </Text>
                     </TouchableOpacity>
                   )}
                   <TouchableOpacity
@@ -642,17 +639,13 @@ const styles = (colors: ReturnType<typeof useColors>) =>
       justifyContent: "flex-end",
     },
     actionBtnPay: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 4,
       backgroundColor: colors.successBg,
-      paddingHorizontal: 10,
-      paddingVertical: 6,
+      padding: 7,
       borderRadius: 8,
-    },
-    actionBtnText: {
-      fontSize: 12,
-      fontFamily: "Inter_600SemiBold",
+      width: 30,
+      height: 30,
+      alignItems: "center",
+      justifyContent: "center",
     },
     actionBtnPDF: {
       backgroundColor: colors.primary + "15",
@@ -695,6 +688,10 @@ const styles = (colors: ReturnType<typeof useColors>) =>
       backgroundColor: colors.dangerBg,
       padding: 7,
       borderRadius: 8,
+      width: 30,
+      height: 30,
+      alignItems: "center",
+      justifyContent: "center",
     },
     toast: {
       position: "absolute",
