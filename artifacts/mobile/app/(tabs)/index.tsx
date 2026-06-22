@@ -145,7 +145,7 @@ export default function DashboardScreen() {
           />
           <MetricCard
             label="Avg. Payment"
-            value={metrics.avgDays ? `~${metrics.avgDays}` : "—"}
+            value={metrics.avgDays != null ? `~${metrics.avgDays}` : "—"}
             sub="days"
             valueColor={colors.foreground}
           />

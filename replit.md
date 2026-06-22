@@ -18,7 +18,7 @@ Chaser is a local-only mobile app (Expo / React Native) that helps freelancers t
 
 ## Where things live (artifacts/mobile)
 
-- `context/InvoicesContext.tsx` — **source of truth** for the invoice data model: `Invoice`/`LineItem` types, `normalizeInvoice` (legacy migration), `computeInvoiceTotals`, `getEffectiveStatus`, `isPastDue`, currency-scoped `metrics`/`clients`, `primaryCurrency`, and mutations (`addInvoice`, `markPaid`, `recordPayment`, `updateInvoice`, `deleteInvoice`).
+- `context/InvoicesContext.tsx` — **source of truth** for the invoice data model: `Invoice`/`LineItem` types (incl. `paidAt`, the ISO timestamp set when an invoice becomes fully paid), `normalizeInvoice` (legacy migration), `computeInvoiceTotals`, `getEffectiveStatus`, `isPastDue`, `daysToPay`, currency-scoped `metrics`/`clients` (avg-days-to-pay is derived from `createdAt`→`paidAt`), `primaryCurrency`, and mutations (`addInvoice`, `markPaid`, `recordPayment`, `updateInvoice`, `deleteInvoice`).
 - `context/BusinessProfileContext.tsx` — reactive business profile (name, address, VAT, bank details, Pay Now link, logo, defaults). Migrates legacy `fp_issuer_profile`.
 - `utils/currency.ts` — `CURRENCIES`, `formatMoney(amount, code, numberFormat)`, `currencySymbol`, `isCurrencyCode` (currency validation at data boundaries).
 - `utils/generateInvoicePDF.ts` — `exportInvoicePDF(invoice, businessProfile)` builds the invoice HTML and shares it as a PDF.
@@ -28,6 +28,7 @@ Chaser is a local-only mobile app (Expo / React Native) that helps freelancers t
 
 ## Architecture decisions
 
+- **New installs start empty.** No demo/seed invoices ship to users; every tab renders its first-run empty state until the user adds their own data. Storage is only written once the first invoice is created (legacy data is still normalized-on-load exactly once).
 - **Local-only by design.** No server/DB. The "unique hosted invoice URL a client opens in a browser" feature is intentionally deferred because it would require a backend. "Pay Now" is a freelancer-provided payment link (PayPal.me / Stripe Payment Link / custom), not a hosted checkout.
 - **Installable as a web PWA (additive — the native build is untouched).** `app.json` sets `web.output: "static"` so expo-router applies `app/+html.tsx`, which injects the PWA `<head>` (manifest link, `theme-color` #1D9E75, apple-touch-icon, `viewport-fit=cover`) and the service-worker registration into every exported route. `public/` holds `manifest.webmanifest`, `sw.js`, icons, and favicon. **The deployed mobile artifact is still a native Expo Go build:** `server/serve.js` serves the Expo manifest first when the request carries an `expo-platform: ios|android` header (and serves native static files next), only falling back to the web build / PWA for browsers. `scripts/build.js` runs `expo export --platform web` after the native build as a best-effort step (it warns but never aborts the native build on failure). `web.output` must stay `"static"` — with `"single"`, expo-router silently ignores `+html.tsx` and the PWA tags vanish.
 - **Money is always computed, never stored as a single `amount`.** Every screen derives amounts from `computeInvoiceTotals(invoice)` and renders via `formatMoney(value, invoice.currency, profile.numberFormat)`. Legacy `desc`/`amount` fields exist only for migration and must not be a source of truth.

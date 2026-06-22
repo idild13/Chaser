@@ -42,6 +42,7 @@ export interface Invoice {
   due: string; // YYYY-MM-DD
   status: InvoiceStatus; // stored intent; use getEffectiveStatus for display
   amountPaid?: number;
+  paidAt?: string; // ISO timestamp, set when the invoice becomes fully paid
   createdAt: string;
   // legacy fields kept optional for back-compat only (not a source of truth)
   desc?: string;
@@ -202,6 +203,12 @@ function normalizeInvoice(raw: any): Invoice {
     createdAt: String(r.createdAt ?? new Date().toISOString()),
   };
 
+  // Validate the paid timestamp at the load boundary; drop anything unparseable.
+  if (r.paidAt) {
+    const d = new Date(String(r.paidAt));
+    if (!isNaN(d.getTime())) inv.paidAt = d.toISOString();
+  }
+
   if (r.amountPaid != null) {
     inv.amountPaid = round2(Number(r.amountPaid) || 0);
   } else {
@@ -211,68 +218,6 @@ function normalizeInvoice(raw: any): Invoice {
 
   return inv;
 }
-
-// ---- Seed -----------------------------------------------------------------
-
-const SEED_INVOICES: Invoice[] = [
-  {
-    id: "1",
-    client: "Müller Design",
-    invnum: "INV-001",
-    lineItems: [
-      {
-        id: "li1",
-        description: "Brand identity package",
-        quantity: 1,
-        unitPrice: 2400,
-      },
-    ],
-    currency: "EUR",
-    taxRate: 0,
-    due: "2026-06-01",
-    status: "paid",
-    amountPaid: 2400,
-    createdAt: "2026-05-01T00:00:00.000Z",
-  },
-  {
-    id: "2",
-    client: "TechStart GmbH",
-    invnum: "INV-002",
-    lineItems: [
-      {
-        id: "li2",
-        description: "Landing page development",
-        quantity: 1,
-        unitPrice: 1800,
-      },
-    ],
-    currency: "EUR",
-    taxRate: 0,
-    due: "2026-06-10",
-    status: "overdue",
-    amountPaid: 0,
-    createdAt: "2026-05-10T00:00:00.000Z",
-  },
-  {
-    id: "3",
-    client: "Bright Agency",
-    invnum: "INV-003",
-    lineItems: [
-      {
-        id: "li3",
-        description: "Social media graphics",
-        quantity: 1,
-        unitPrice: 950,
-      },
-    ],
-    currency: "EUR",
-    taxRate: 0,
-    due: "2026-07-25",
-    status: "pending",
-    amountPaid: 0,
-    createdAt: "2026-06-01T00:00:00.000Z",
-  },
-];
 
 // ---- Aggregations ---------------------------------------------------------
 
@@ -293,13 +238,24 @@ function computePrimaryCurrency(invoices: Invoice[]): CurrencyCode {
   return best;
 }
 
+// Days between issuing an invoice (createdAt) and it being fully paid (paidAt).
+// Returns null when we can't measure it (no paid timestamp / unparseable dates).
+function daysToPay(inv: Invoice): number | null {
+  if (!inv.paidAt || !inv.createdAt) return null;
+  const start = new Date(inv.createdAt).getTime();
+  const end = new Date(inv.paidAt).getTime();
+  if (isNaN(start) || isNaN(end)) return null;
+  return Math.max(0, (end - start) / 86400000);
+}
+
 function computeMetrics(invoices: Invoice[], currency: CurrencyCode): Metrics {
   let totalEarned = 0;
   let pending = 0;
   let pendingCount = 0;
   let overdue = 0;
   let overdueCount = 0;
-  let paidCount = 0;
+  let payDaysSum = 0;
+  let payDaysCount = 0;
 
   invoices
     .filter((i) => i.currency === currency)
@@ -308,7 +264,11 @@ function computeMetrics(invoices: Invoice[], currency: CurrencyCode): Metrics {
       totalEarned += t.amountPaid;
       const eff = getEffectiveStatus(inv);
       if (eff === "paid") {
-        paidCount++;
+        const days = daysToPay(inv);
+        if (days != null) {
+          payDaysSum += days;
+          payDaysCount++;
+        }
       } else if (eff === "overdue" && t.balanceDue > 0) {
         overdue += t.balanceDue;
         overdueCount++;
@@ -325,7 +285,7 @@ function computeMetrics(invoices: Invoice[], currency: CurrencyCode): Metrics {
     pendingCount,
     overdue: round2(overdue),
     overdueCount,
-    avgDays: paidCount > 0 ? 14 : null,
+    avgDays: payDaysCount > 0 ? Math.round(payDaysSum / payDaysCount) : null,
   };
 }
 
@@ -378,22 +338,21 @@ export function InvoicesProvider({ children }: { children: React.ReactNode }) {
         raw = await secureGet(STORAGE_KEY);
       }
 
-      let list: Invoice[];
+      let list: Invoice[] = [];
       if (raw) {
         try {
           const parsed = JSON.parse(raw);
-          list = Array.isArray(parsed)
-            ? parsed.map(normalizeInvoice)
-            : SEED_INVOICES.map(normalizeInvoice);
+          list = Array.isArray(parsed) ? parsed.map(normalizeInvoice) : [];
         } catch {
-          list = SEED_INVOICES.map(normalizeInvoice);
+          list = [];
         }
-      } else {
-        list = SEED_INVOICES.map(normalizeInvoice);
       }
       setInvoices(list);
-      // Persist normalized shape so the migration runs only once.
-      await secureSet(STORAGE_KEY, JSON.stringify(list));
+      // New users start empty; only persist when there's existing data to
+      // normalize, so the legacy migration still runs exactly once.
+      if (list.length > 0) {
+        await secureSet(STORAGE_KEY, JSON.stringify(list));
+      }
       setIsLoading(false);
     })();
   }, []);
@@ -424,7 +383,12 @@ export function InvoicesProvider({ children }: { children: React.ReactNode }) {
         const next = prev.map((inv) => {
           if (inv.id !== id) return inv;
           const { total } = computeInvoiceTotals(inv);
-          return { ...inv, status: "paid" as InvoiceStatus, amountPaid: total };
+          return {
+            ...inv,
+            status: "paid" as InvoiceStatus,
+            amountPaid: total,
+            paidAt: inv.paidAt ?? new Date().toISOString(),
+          };
         });
         save(next);
         return next;
@@ -442,9 +406,14 @@ export function InvoicesProvider({ children }: { children: React.ReactNode }) {
           const paid = round2(
             Math.min(total, Math.max(0, (inv.amountPaid || 0) + amount))
           );
-          const status: InvoiceStatus =
-            paid >= total - 0.005 ? "paid" : inv.status;
-          return { ...inv, amountPaid: paid, status };
+          const settled = paid >= total - 0.005;
+          const status: InvoiceStatus = settled ? "paid" : inv.status;
+          return {
+            ...inv,
+            amountPaid: paid,
+            status,
+            paidAt: settled ? inv.paidAt ?? new Date().toISOString() : inv.paidAt,
+          };
         });
         save(next);
         return next;
