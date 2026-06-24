@@ -11,3 +11,9 @@ id = "xFdLQ0CIX8eHDQLXuoPXr"
 uri = "file://artifacts/mobile/assets/images/icon.png"
 type = "image"
 title = "Chaser App Icon"
+
+[[outputs]]
+id = "ETJPvJWYBTcP8wHDmMUdH"
+uri = "file://artifacts/mobile/static-build/chaser-vercel.zip"
+type = "unspecified"
+title = "Chaser — Vercel Web Build (ZIP)"
