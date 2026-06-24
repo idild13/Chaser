@@ -1,3 +1,2 @@
-- [Invoice paidAt lifecycle](invoice-paid-lifecycle.md) — every path that leaves an invoice effectively paid must stamp paidAt (else avg-days metric silently drops it); re-opening a balance must clear it.
-- [Expo SDK version alignment](expo-sdk-version-alignment.md) — native expo-* module versions must match the installed SDK; the web preview uses JS shims so mismatches stay invisible (typecheck/bundle/e2e all pass) until on-device.
-- [mailto query encoding](mailto-encoding.md) — build mailto subject/body with encodeURIComponent, not URLSearchParams (URLSearchParams encodes spaces as "+", which Apple Mail renders literally).
+- [Expo web static export](expo-web-static-export.md) — Expo web `.ttf` assets land under `.pnpm/` dot-dir → 404 on Vercel; use the `export:web` sanitizer + the no-zip-tooling packaging notes.
+- [Web PDF print](web-pdf-print.md) — on web/PWA, print invoices via a hidden iframe (not window.open, which traps standalone PWA users); clean up on `onafterprint` + long fallback.

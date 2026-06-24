@@ -563,13 +563,60 @@ export async function exportInvoicePDF(
   const html = buildHTML(inv, profile);
 
   if (Platform.OS === "web") {
-    const win = window.open("", "_blank");
-    if (win) {
-      win.document.write(html);
-      win.document.close();
-      win.focus();
-      setTimeout(() => win.print(), 300);
+    // Render the invoice into a hidden, off-screen iframe and print from there.
+    // The previous window.open() approach trapped standalone-PWA users on a
+    // chrome-less tab with no way back to the app. An iframe keeps the SPA (and
+    // the bottom tab bar) mounted, so after printing the user remains on the
+    // invoices screen with navigation fully functional.
+    if (typeof document === "undefined") return;
+
+    const iframe = document.createElement("iframe");
+    iframe.setAttribute("aria-hidden", "true");
+    iframe.style.position = "fixed";
+    iframe.style.left = "-9999px";
+    iframe.style.bottom = "0";
+    iframe.style.width = "0";
+    iframe.style.height = "0";
+    iframe.style.border = "0";
+    document.body.appendChild(iframe);
+
+    let cleaned = false;
+    let fallbackTimer: ReturnType<typeof setTimeout> | undefined;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      if (fallbackTimer) clearTimeout(fallbackTimer);
+      if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+    };
+
+    const frameWin = iframe.contentWindow;
+    const doc = frameWin?.document;
+    if (!frameWin || !doc) {
+      iframe.remove();
+      return;
     }
+
+    doc.open();
+    doc.write(html);
+    doc.close();
+
+    // Remove the iframe only once printing is finished. Relying on onafterprint
+    // (rather than removing shortly after print()) avoids blanking the print
+    // preview on browsers where print() returns before the dialog is dismissed.
+    // The long fallback guarantees the hidden iframe is never leaked if the
+    // event never fires (e.g. print is unavailable).
+    frameWin.onafterprint = cleanup;
+    fallbackTimer = setTimeout(cleanup, 60000);
+
+    // Give the iframe a tick to lay out before invoking the print dialog.
+    setTimeout(() => {
+      try {
+        frameWin.focus();
+        frameWin.print();
+      } catch {
+        cleanup();
+      }
+    }, 300);
     return;
   }
 
