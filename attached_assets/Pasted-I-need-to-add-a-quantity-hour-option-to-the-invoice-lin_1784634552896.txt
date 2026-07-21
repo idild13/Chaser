@@ -1,0 +1,39 @@
+I need to add a quantity/hour option to the invoice line items. Please make this change but do NOT generate the Vercel web build yet — I will ask for that separately once I've tested everything.
+
+Add Qty/Hour option to line items
+
+On the invoice creation and edit form, update the line items section so each line item has the following fields:
+
+Description — what the work is (already exists)
+Type — a toggle or dropdown with two options: "Per Project" and "Per Hour"
+Qty / Hours — a number field. If "Per Hour" is selected, label it "Hours". If "Per Project" is selected, label it "Qty"
+Unit Price — price per hour or per unit
+Subtotal — automatically calculated as Qty/Hours × Unit Price
+
+On the PDF invoice, display this as a proper line items table with columns:
+
+Description	Type	Qty/Hrs	Unit Price	Subtotal
+
+This is a legal requirement for German Finanzamt — the invoice must clearly state whether work was billed hourly or per project.
+
+The total at the bottom of the PDF should sum all line item subtotals automatically.
+
+Again — do NOT export or build for Vercel yet. Just make this change and let me test it alongside the other fixes.
+
+will this make the invoice creation table too crowded?
+
+Potentially yes — if not designed carefully. Here's what to watch out for:
+
+The crowding risk:
+A 5-column table (Description / Type / Qty / Unit Price / Subtotal) on a mobile screen is very tight. On a 375px iPhone screen that's basically unreadable if all columns are equal width.
+
+How to avoid it — add this to your Replit prompt:
+
+"Make sure the line items form is mobile-friendly. On the invoice creation screen, stack the fields vertically per line item rather than showing them in a horizontal table — so each line item shows as a card with Description on top, then Type toggle, then Qty/Hours and Unit Price side by side, then the calculated Subtotal below. Only show the full table layout on the PDF itself, not in the app form."
+
+So the experience would be:
+
+In the app (mobile form):
+
+[ Description field
+Claude’s response was interrupted.

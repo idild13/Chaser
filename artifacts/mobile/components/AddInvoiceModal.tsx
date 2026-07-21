@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColors } from "@/hooks/useColors";
 import {
   computeInvoiceTotals,
+  BillingType,
   DiscountType,
   Invoice,
   InvoiceDraft,
@@ -47,6 +48,7 @@ interface LineItemInput {
   description: string;
   quantity: string;
   unitPrice: string;
+  billingType: BillingType;
 }
 
 type TaxMode = "0" | "7" | "19" | "custom";
@@ -57,7 +59,13 @@ function genLocalId(): string {
 }
 
 function emptyLine(): LineItemInput {
-  return { id: genLocalId(), description: "", quantity: "1", unitPrice: "" };
+  return {
+    id: genLocalId(),
+    description: "",
+    quantity: "1",
+    unitPrice: "",
+    billingType: "project",
+  };
 }
 
 function initialTaxMode(rate: number): TaxMode {
@@ -130,6 +138,7 @@ export default function AddInvoiceModal({
                 description: li.description,
                 quantity: String(li.quantity),
                 unitPrice: String(li.unitPrice),
+                billingType: li.billingType ?? "project",
               }))
             : [emptyLine()]
         );
@@ -217,6 +226,7 @@ export default function AddInvoiceModal({
       description: li.description.trim(),
       quantity: parseFloat(li.quantity) || 0,
       unitPrice: parseFloat(li.unitPrice) || 0,
+      billingType: li.billingType,
     }));
   }
 
@@ -348,10 +358,10 @@ export default function AddInvoiceModal({
     onClose();
   }
 
-  function updateLineItem(
+  function updateLineItem<K extends keyof Omit<LineItemInput, "id">>(
     id: string,
-    field: keyof Omit<LineItemInput, "id">,
-    value: string
+    field: K,
+    value: LineItemInput[K]
   ) {
     setLineItems((prev) =>
       prev.map((li) => (li.id === id ? { ...li, [field]: value } : li))
@@ -653,9 +663,51 @@ export default function AddInvoiceModal({
                             updateLineItem(li.id, "description", t)
                           }
                         />
+                        {/* Billing type — German Finanzamt requires stating
+                            whether work was billed hourly or per project. */}
+                        <View style={s.lineTypeBlock}>
+                          <Text style={s.miniLabel}>Type</Text>
+                          <View style={s.lineTypeRow}>
+                            {(
+                              [
+                                { value: "project", label: "Per Project" },
+                                { value: "hour", label: "Per Hour" },
+                              ] as const
+                            ).map((opt) => {
+                              const active = li.billingType === opt.value;
+                              return (
+                                <TouchableOpacity
+                                  key={opt.value}
+                                  style={[
+                                    s.lineTypeBtn,
+                                    active && s.lineTypeBtnActive,
+                                  ]}
+                                  onPress={() =>
+                                    updateLineItem(
+                                      li.id,
+                                      "billingType",
+                                      opt.value
+                                    )
+                                  }
+                                >
+                                  <Text
+                                    style={[
+                                      s.lineTypeText,
+                                      active && s.lineTypeTextActive,
+                                    ]}
+                                  >
+                                    {opt.label}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        </View>
                         <View style={s.lineNumRow}>
                           <View style={{ flex: 1 }}>
-                            <Text style={s.miniLabel}>Qty</Text>
+                            <Text style={s.miniLabel}>
+                              {li.billingType === "hour" ? "Hours" : "Qty"}
+                            </Text>
                             <TextInput
                               style={s.input}
                               placeholder="1"
@@ -1140,6 +1192,35 @@ const styles = (colors: ReturnType<typeof useColors>) =>
     },
     lineDesc: {
       marginBottom: 10,
+    },
+    lineTypeBlock: {
+      marginBottom: 10,
+    },
+    lineTypeRow: {
+      flexDirection: "row",
+      gap: 8,
+    },
+    lineTypeBtn: {
+      flex: 1,
+      paddingVertical: 8,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.muted,
+      alignItems: "center",
+    },
+    lineTypeBtnActive: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    lineTypeText: {
+      fontSize: 13,
+      fontFamily: "Inter_500Medium",
+      color: colors.foreground,
+    },
+    lineTypeTextActive: {
+      color: colors.primaryForeground,
+      fontFamily: "Inter_600SemiBold",
     },
     lineNumRow: {
       flexDirection: "row",

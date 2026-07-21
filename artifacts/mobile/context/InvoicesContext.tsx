@@ -16,12 +16,16 @@ import {
 
 export type InvoiceStatus = "pending" | "paid" | "overdue";
 export type DiscountType = "percent" | "fixed";
+// German Finanzamt requirement: invoices must state whether work was billed
+// hourly ("hour") or per project/unit ("project").
+export type BillingType = "project" | "hour";
 
 export interface LineItem {
   id: string;
   description: string;
   quantity: number;
   unitPrice: number;
+  billingType: BillingType;
 }
 
 export interface Invoice {
@@ -167,6 +171,10 @@ function normalizeInvoice(raw: any): Invoice {
           description: String(li?.description ?? ""),
           quantity: Number(li?.quantity) || 0,
           unitPrice: Number(li?.unitPrice) || 0,
+          // Legacy line items predate the billing type; default to per-project.
+          billingType: (li?.billingType === "hour"
+            ? "hour"
+            : "project") as BillingType,
         }))
       : [
           {
@@ -174,6 +182,7 @@ function normalizeInvoice(raw: any): Invoice {
             description: String(r.desc ?? "Services"),
             quantity: 1,
             unitPrice: Number(r.amount) || 0,
+            billingType: "project" as BillingType,
           },
         ];
 

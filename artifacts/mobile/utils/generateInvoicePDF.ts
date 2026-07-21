@@ -64,7 +64,10 @@ function invoiceFileBaseName(inv: Invoice): string {
     String(s ?? "")
       .replace(/[^a-zA-Z0-9-]+/g, "_")
       .replace(/^_+|_+$/g, "");
-  const parts = [inv.client, inv.invnum, inv.due]
+  // Due date in DD-MM-YYYY (display convention, dash-separated so the
+  // sanitizer keeps it intact in the file name).
+  const dueForName = formatDisplayDate(inv.due).replace(/\//g, "-");
+  const parts = [inv.client, inv.invnum, dueForName]
     .map(sanitize)
     .filter((p) => p.length > 0);
   const base = parts.join("_").slice(0, 100);
@@ -144,9 +147,13 @@ function buildHTML(inv: Invoice, profile: BusinessProfile): string {
       const qty = Number(li.quantity) || 0;
       const unit = Number(li.unitPrice) || 0;
       const lineSubtotal = qty * unit;
+      // Finanzamt requirement: state whether the line was billed hourly or
+      // per project. Legacy items without a billingType default to project.
+      const typeLabel = li.billingType === "hour" ? "Per Hour" : "Per Project";
       return `
         <tr>
           <td>${esc(li.description || "—")}</td>
+          <td>${esc(typeLabel)}</td>
           <td class="num">${esc(qty)}</td>
           <td class="num">${money(unit)}</td>
           <td class="num">${money(lineSubtotal)}</td>
@@ -491,9 +498,10 @@ function buildHTML(inv: Invoice, profile: BusinessProfile): string {
       <thead>
         <tr>
           <th>Description</th>
-          <th class="num">Qty</th>
+          <th>Type</th>
+          <th class="num">Qty/Hrs</th>
           <th class="num">Unit Price</th>
-          <th class="num">Amount</th>
+          <th class="num">Subtotal</th>
         </tr>
       </thead>
       <tbody>
