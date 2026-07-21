@@ -19,8 +19,9 @@ Chaser is a local-only mobile app (Expo / React Native) that helps freelancers t
 ## Where things live (artifacts/mobile)
 
 - `context/InvoicesContext.tsx` — **source of truth** for the invoice data model: `Invoice`/`LineItem` types (incl. `paidAt`, the ISO timestamp set when an invoice becomes fully paid), `normalizeInvoice` (legacy migration), `computeInvoiceTotals`, `getEffectiveStatus`, `isPastDue`, `daysToPay`, currency-scoped `metrics`/`clients` (avg-days-to-pay is derived from `createdAt`→`paidAt`), `primaryCurrency`, and mutations (`addInvoice`, `markPaid`, `recordPayment`, `updateInvoice`, `deleteInvoice`).
-- `context/BusinessProfileContext.tsx` — reactive business profile (name, address, VAT, bank details, Pay Now link, logo, defaults). Migrates legacy `fp_issuer_profile`.
+- `context/BusinessProfileContext.tsx` — reactive business profile (name, address, VAT, bank details, Pay Now link, logo, defaults, `invoiceNotes`). Migrates legacy `fp_issuer_profile`. `invoiceNotes` ("Business Notes" in My Info) pre-fills the notes field on every new invoice and is the PDF-notes fallback when an invoice has no notes of its own (e.g. §19 UStG notice).
 - `utils/currency.ts` — `CURRENCIES`, `formatMoney(amount, code, numberFormat)`, `currencySymbol`, `isCurrencyCode` (currency validation at data boundaries).
+- `utils/date.ts` — `formatDisplayDate` (stored ISO → DD/MM/YYYY for ALL user-facing dates: dashboard, invoice list, form, PDF, email reminders) and `parseDisplayDate` (DD/MM/YYYY input → stored YYYY-MM-DD, null when invalid). Storage stays ISO so sorting/`isPastDue` keep working.
 - `utils/generateInvoicePDF.ts` — `exportInvoicePDF(invoice, businessProfile)` builds the invoice HTML and shares it as a PDF. Native export copies the temp file to a recognizable `Client_Invoice_DueDate.pdf` name (via `invoiceFileBaseName`) before sharing; the HTML `<title>` carries the same base so browser "Save as PDF" suggests it too.
 - `utils/sendEmailReminder.ts` — prefilled mailto reminder using the invoice's client email + currency. Query is built with `encodeURIComponent` (NOT `URLSearchParams`, which would render spaces as literal "+").
 - `components/AddInvoiceModal.tsx` — full invoice creation form (line items, currency, tax, discount, terms, addresses).
@@ -51,6 +52,8 @@ _Populate as you build — explicit user instructions worth remembering across s
 ## Gotchas
 
 - After changing the invoice schema, update `normalizeInvoice` so legacy/persisted invoices still load without data loss, and validate enum-like fields (e.g. currency via `isCurrencyCode`) at the load boundary.
+- Client address is structured (`clientStreet` / `clientPostcode` / `clientCity` / `clientCountry`, rendered postcode-before-city in the PDF). The legacy single-field `clientAddress` is display-fallback only: the edit form prefills it into the street field and saving writes the structured fields while clearing `clientAddress`.
+- All user-facing dates render DD/MM/YYYY via `formatDisplayDate`; never display raw `inv.due`/`createdAt`. The Due Date input accepts DD/MM/YYYY and converts to ISO via `parseDisplayDate` on save — storage must stay YYYY-MM-DD.
 - When adding any amount to the UI or PDF, decide deliberately between `total` (the invoice's value) and `balanceDue` (what's still owed). Chase/reminder surfaces use `balanceDue`; the invoice's headline value uses `total`.
 - Any code path that leaves an invoice effectively paid (`balanceDue <= ~0.005`) must stamp `paidAt` (`existing ?? new Date().toISOString()`); a path that re-opens a balance must clear it (`paidAt: undefined`). The avg-payment-days metric counts only invoices with a `paidAt`, so a missed stamp silently drops a paid invoice from the metric.
 

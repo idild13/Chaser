@@ -24,6 +24,7 @@ import {
   useInvoices,
 } from "@/context/InvoicesContext";
 import { CurrencyCode, formatMoney } from "@/utils/currency";
+import { formatDisplayDate } from "@/utils/date";
 import { sendEmailReminder } from "@/utils/sendEmailReminder";
 
 const AVATAR_COLORS = [
@@ -174,7 +175,7 @@ export default function DashboardScreen() {
                     </View>
                     <View style={s.invInfo}>
                       <Text style={s.invClient}>{inv.client}</Text>
-                      <Text style={s.invMeta}>{inv.invnum} · Due {inv.due}</Text>
+                      <Text style={s.invMeta}>{inv.invnum} · Due {formatDisplayDate(inv.due)}</Text>
                     </View>
                     <View style={s.invRight}>
                       <Text style={s.invAmount}>{fmt(computeInvoiceTotals(inv).total, inv.currency)}</Text>

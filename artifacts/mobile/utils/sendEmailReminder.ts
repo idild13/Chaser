@@ -4,6 +4,7 @@ import {
   getEffectiveStatus,
 } from "@/context/InvoicesContext";
 import { NumberFormat, formatMoney } from "@/utils/currency";
+import { formatDisplayDate } from "@/utils/date";
 import * as Linking from "expo-linking";
 import { Alert, Platform } from "react-native";
 
@@ -33,7 +34,7 @@ function buildReminderEmail(
     const body = [
       `Hi,`,
       ``,
-      `I hope this message finds you well. I'm following up on invoice ${inv.invnum} for ${amount}, which was due on ${inv.due} — ${days} day${days !== 1 ? "s" : ""} ago.`,
+      `I hope this message finds you well. I'm following up on invoice ${inv.invnum} for ${amount}, which was due on ${formatDisplayDate(inv.due)} — ${days} day${days !== 1 ? "s" : ""} ago.`,
       ``,
       `Could you please let me know when we can expect the payment, or if there is anything I can help clarify? I'd appreciate hearing from you at your earliest convenience.`,
       ``,
@@ -50,7 +51,7 @@ function buildReminderEmail(
   const body = [
     `Hi,`,
     ``,
-    `I hope you're doing well. This is a friendly reminder that invoice ${inv.invnum} for ${amount} is due on ${inv.due}${days <= 0 ? " — today" : ""}.`,
+    `I hope you're doing well. This is a friendly reminder that invoice ${inv.invnum} for ${amount} is due on ${formatDisplayDate(inv.due)}${days <= 0 ? " — today" : ""}.`,
     ``,
     `Please let me know if you have any questions or need anything else from me.`,
     ``,

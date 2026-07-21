@@ -33,6 +33,7 @@ import {
   currencySymbol,
   formatMoney,
 } from "@/utils/currency";
+import { formatDisplayDate, parseDisplayDate } from "@/utils/date";
 
 interface Props {
   visible: boolean;
@@ -86,7 +87,10 @@ export default function AddInvoiceModal({
 
   const [client, setClient] = useState("");
   const [clientEmail, setClientEmail] = useState("");
-  const [clientAddress, setClientAddress] = useState("");
+  const [clientStreet, setClientStreet] = useState("");
+  const [clientCity, setClientCity] = useState("");
+  const [clientPostcode, setClientPostcode] = useState("");
+  const [clientCountry, setClientCountry] = useState("");
   const [invnum, setInvnum] = useState(nextInvNum);
   const [poNumber, setPoNumber] = useState("");
   const [due, setDue] = useState("");
@@ -110,7 +114,14 @@ export default function AddInvoiceModal({
         setInvnum(editInvoice.invnum);
         setClient(editInvoice.client);
         setClientEmail(editInvoice.clientEmail ?? "");
-        setClientAddress(editInvoice.clientAddress ?? "");
+        // Legacy invoices only have the single-field clientAddress; surface it
+        // in the street field so nothing is lost when re-saving.
+        setClientStreet(
+          editInvoice.clientStreet ?? editInvoice.clientAddress ?? ""
+        );
+        setClientCity(editInvoice.clientCity ?? "");
+        setClientPostcode(editInvoice.clientPostcode ?? "");
+        setClientCountry(editInvoice.clientCountry ?? "");
         setPoNumber(editInvoice.poNumber ?? "");
         setLineItems(
           editInvoice.lineItems && editInvoice.lineItems.length > 0
@@ -139,18 +150,23 @@ export default function AddInvoiceModal({
         setTermCustom(eptm === "custom" ? ept : "");
         setPaymentNotes(editInvoice.paymentNotes ?? "");
         setStatus(editInvoice.status);
-        setDue(editInvoice.due);
+        setDue(formatDisplayDate(editInvoice.due));
         setErrors({});
       } else {
         setInvnum(nextInvNum);
         setClient("");
         setClientEmail("");
-        setClientAddress("");
+        setClientStreet("");
+        setClientCity("");
+        setClientPostcode("");
+        setClientCountry("");
         setPoNumber("");
         setLineItems([emptyLine()]);
         setDiscountType("percent");
         setDiscountValue("");
-        setPaymentNotes("");
+        // Business-wide notes (My Info) pre-fill the per-invoice notes so
+        // legal notices appear on every invoice but stay editable per invoice.
+        setPaymentNotes(profile.invoiceNotes ?? "");
         setStatus("pending");
         setErrors({});
 
@@ -168,7 +184,7 @@ export default function AddInvoiceModal({
 
         const defaultDue = new Date();
         defaultDue.setDate(defaultDue.getDate() + 30);
-        setDue(defaultDue.toISOString().split("T")[0]);
+        setDue(formatDisplayDate(defaultDue.toISOString().split("T")[0]));
       }
 
       Animated.spring(slideAnim, {
@@ -190,9 +206,9 @@ export default function AddInvoiceModal({
     taxMode === "custom" ? parseFloat(taxCustom) || 0 : Number(taxMode);
   const effectiveTerms =
     termMode === "custom" ? termCustom.trim() : termMode;
-  const issueDate =
-    (editInvoice?.createdAt ?? "").split("T")[0] ||
-    (editInvoice?.createdAt ?? "");
+  const issueDate = editInvoice?.createdAt
+    ? formatDisplayDate(editInvoice.createdAt)
+    : "";
   const lockCurrency = isEdit && (editInvoice?.amountPaid ?? 0) > 0;
 
   function numericLineItems(): LineItem[] {
@@ -214,11 +230,15 @@ export default function AddInvoiceModal({
       lineItems: items.length > 0 ? items : numericLineItems(),
       currency,
       taxRate: effectiveTaxRate,
-      due,
+      // The form shows DD/MM/YYYY; storage stays ISO (YYYY-MM-DD).
+      due: parseDisplayDate(due) ?? "",
       status,
     };
     if (clientEmail.trim()) draft.clientEmail = clientEmail.trim();
-    if (clientAddress.trim()) draft.clientAddress = clientAddress.trim();
+    if (clientStreet.trim()) draft.clientStreet = clientStreet.trim();
+    if (clientCity.trim()) draft.clientCity = clientCity.trim();
+    if (clientPostcode.trim()) draft.clientPostcode = clientPostcode.trim();
+    if (clientCountry.trim()) draft.clientCountry = clientCountry.trim();
     if (poNumber.trim()) draft.poNumber = poNumber.trim();
     const dv = parseFloat(discountValue) || 0;
     if (dv > 0) {
@@ -247,8 +267,8 @@ export default function AddInvoiceModal({
     if (!anyValid)
       e.lineItems = "Add at least one line item with description, qty and price";
 
-    if (!due) e.due = "Due date is required";
-    else if (!/^\d{4}-\d{2}-\d{2}$/.test(due)) e.due = "Format: YYYY-MM-DD";
+    if (!due.trim()) e.due = "Due date is required";
+    else if (!parseDisplayDate(due)) e.due = "Format: DD/MM/YYYY";
 
     if (
       clientEmail.trim() &&
@@ -290,7 +310,12 @@ export default function AddInvoiceModal({
       const patch: Partial<Invoice> = {
         client: client.trim(),
         clientEmail: clientEmail.trim() || undefined,
-        clientAddress: clientAddress.trim() || undefined,
+        // The structured fields replace the legacy single-field address.
+        clientAddress: undefined,
+        clientStreet: clientStreet.trim() || undefined,
+        clientCity: clientCity.trim() || undefined,
+        clientPostcode: clientPostcode.trim() || undefined,
+        clientCountry: clientCountry.trim() || undefined,
         poNumber: poNumber.trim() || undefined,
         lineItems: draft.lineItems,
         currency,
@@ -299,7 +324,7 @@ export default function AddInvoiceModal({
         discountValue: dv > 0 ? dv : undefined,
         paymentTerms: effectiveTerms || undefined,
         paymentNotes: paymentNotes.trim() || undefined,
-        due,
+        due: parseDisplayDate(due) ?? due,
         amountPaid: newPaid,
         paidAt: stillPaid
           ? editInvoice.paidAt ?? new Date().toISOString()
@@ -491,13 +516,34 @@ export default function AddInvoiceModal({
                 <View style={s.field}>
                   <Text style={s.label}>Client Address (optional)</Text>
                   <TextInput
-                    style={[s.input, s.textArea]}
-                    placeholder="Street, City, Country"
+                    style={s.input}
+                    placeholder="Street and number"
                     placeholderTextColor={colors.mutedForeground}
-                    value={clientAddress}
-                    onChangeText={setClientAddress}
-                    multiline
-                    numberOfLines={2}
+                    value={clientStreet}
+                    onChangeText={setClientStreet}
+                  />
+                  <View style={[s.row, { marginTop: 8 }]}>
+                    <TextInput
+                      style={[s.input, { flex: 1 }]}
+                      placeholder="Postcode"
+                      placeholderTextColor={colors.mutedForeground}
+                      value={clientPostcode}
+                      onChangeText={setClientPostcode}
+                    />
+                    <TextInput
+                      style={[s.input, { flex: 2 }]}
+                      placeholder="City"
+                      placeholderTextColor={colors.mutedForeground}
+                      value={clientCity}
+                      onChangeText={setClientCity}
+                    />
+                  </View>
+                  <TextInput
+                    style={[s.input, { marginTop: 8 }]}
+                    placeholder="Country"
+                    placeholderTextColor={colors.mutedForeground}
+                    value={clientCountry}
+                    onChangeText={setClientCountry}
                   />
                 </View>
 
@@ -517,7 +563,7 @@ export default function AddInvoiceModal({
                     <Text style={s.label}>Due Date</Text>
                     <TextInput
                       style={[s.input, errors.due ? s.inputError : null]}
-                      placeholder="YYYY-MM-DD"
+                      placeholder="DD/MM/YYYY"
                       placeholderTextColor={colors.mutedForeground}
                       value={due}
                       onChangeText={(t) => {
@@ -794,12 +840,12 @@ export default function AddInvoiceModal({
                   )}
                 </View>
 
-                {/* Payment notes */}
+                {/* Notes (prefilled from My Info Business Notes) */}
                 <View style={s.field}>
-                  <Text style={s.label}>Payment Notes (optional)</Text>
+                  <Text style={s.label}>Notes (optional)</Text>
                   <TextInput
                     style={[s.input, s.textArea]}
-                    placeholder="e.g. Please reference the invoice number on payment"
+                    placeholder="Shown at the bottom of the PDF — prefilled from My Info Business Notes"
                     placeholderTextColor={colors.mutedForeground}
                     value={paymentNotes}
                     onChangeText={setPaymentNotes}

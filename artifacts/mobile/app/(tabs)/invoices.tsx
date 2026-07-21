@@ -31,6 +31,7 @@ import {
   useInvoices,
 } from "@/context/InvoicesContext";
 import { formatMoney } from "@/utils/currency";
+import { formatDisplayDate } from "@/utils/date";
 import { confirmAction } from "@/utils/confirm";
 import { exportInvoicePDF } from "@/utils/generateInvoicePDF";
 import { sendEmailReminder } from "@/utils/sendEmailReminder";
@@ -314,7 +315,7 @@ export default function InvoicesScreen() {
                     color={colors.mutedForeground}
                     style={{ marginLeft: 8 }}
                   />
-                  <Text style={s.invMetaText}>Due {inv.due}</Text>
+                  <Text style={s.invMetaText}>Due {formatDisplayDate(inv.due)}</Text>
                 </View>
 
                 {totals.amountPaid > 0 && totals.balanceDue > 0 && (

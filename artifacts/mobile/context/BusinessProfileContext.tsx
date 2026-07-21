@@ -26,6 +26,12 @@ export interface BusinessProfile {
   defaultPaymentTerms: string;
   defaultTaxRate: number;
   numberFormat: NumberFormat;
+  /**
+   * Business-wide notes printed at the bottom of every invoice PDF (e.g. the
+   * German §19 UStG Kleinunternehmerregelung notice). Pre-fills the per-invoice
+   * notes field so it can still be edited per invoice.
+   */
+  invoiceNotes: string;
 }
 
 export const DEFAULT_PROFILE: BusinessProfile = {
@@ -40,6 +46,7 @@ export const DEFAULT_PROFILE: BusinessProfile = {
   defaultPaymentTerms: "Net-30",
   defaultTaxRate: 0,
   numberFormat: "comma-dot",
+  invoiceNotes: "",
 };
 
 const KEY = "fp_business_profile";

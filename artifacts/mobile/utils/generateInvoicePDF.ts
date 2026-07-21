@@ -8,6 +8,7 @@ import {
   DEFAULT_PROFILE,
 } from "@/context/BusinessProfileContext";
 import { formatMoney } from "@/utils/currency";
+import { formatDisplayDate } from "@/utils/date";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
 import * as FileSystem from "expo-file-system/legacy";
@@ -48,13 +49,7 @@ function safeImageSrc(uri: string | undefined): string | null {
 
 function fmtDate(dateStr: string): string {
   try {
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return dateStr;
-    return d.toLocaleDateString("en-GB", {
-      day: "numeric",
-      month: "long",
-      year: "numeric",
-    });
+    return formatDisplayDate(dateStr);
   } catch {
     return dateStr;
   }
@@ -113,10 +108,24 @@ function buildHTML(inv: Invoice, profile: BusinessProfile): string {
     senderLines.push(`<div class="party-name">Your Name</div>`);
 
   // --- Client block (Bill To) ---
+  // Structured address (street / postcode city / country) is preferred; the
+  // legacy single-field clientAddress is only rendered for old invoices that
+  // were never re-saved with the structured fields.
   const clientLines: string[] = [];
   clientLines.push(`<div class="party-name">${esc(inv.client || "Client")}</div>`);
-  if (inv.clientAddress)
+  const cityLine = [inv.clientPostcode, inv.clientCity]
+    .map((p) => (p ?? "").trim())
+    .filter((p) => p.length > 0)
+    .join(" ");
+  const structuredAddress = [inv.clientStreet?.trim(), cityLine, inv.clientCountry?.trim()]
+    .filter((p): p is string => !!p && p.length > 0);
+  if (structuredAddress.length > 0) {
+    for (const line of structuredAddress) {
+      clientLines.push(`<div class="party-detail">${esc(line)}</div>`);
+    }
+  } else if (inv.clientAddress) {
     clientLines.push(`<div class="party-detail">${escMultiline(inv.clientAddress)}</div>`);
+  }
   if (inv.clientEmail)
     clientLines.push(`<div class="party-detail">${esc(inv.clientEmail)}</div>`);
 
@@ -199,10 +208,13 @@ function buildHTML(inv: Invoice, profile: BusinessProfile): string {
        </div>`
     : "";
 
-  // --- Payment notes (editable per-invoice, fallback default message) ---
+  // --- Notes (editable per-invoice; falls back to the business-wide notes so
+  // legal notices like §19 UStG appear on every PDF, then to a default) ---
   const notesText =
     inv.paymentNotes && inv.paymentNotes.trim().length > 0
       ? escMultiline(inv.paymentNotes)
+      : profile.invoiceNotes && profile.invoiceNotes.trim().length > 0
+      ? escMultiline(profile.invoiceNotes)
       : `Please make payment by ${esc(due)}. Thank you for your business — it's a pleasure working with you.`;
   const notesBlock = `<div class="notes">
       <div class="notes-title">Notes</div>

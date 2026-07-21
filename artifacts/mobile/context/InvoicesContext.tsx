@@ -28,7 +28,12 @@ export interface Invoice {
   id: string;
   client: string;
   clientEmail?: string;
+  /** Legacy single-field address; superseded by the structured fields below. */
   clientAddress?: string;
+  clientStreet?: string;
+  clientCity?: string;
+  clientPostcode?: string;
+  clientCountry?: string;
   invnum: string;
   poNumber?: string;
   lineItems: LineItem[];
@@ -182,6 +187,10 @@ function normalizeInvoice(raw: any): Invoice {
     client: String(r.client ?? ""),
     clientEmail: r.clientEmail ? String(r.clientEmail) : undefined,
     clientAddress: r.clientAddress ? String(r.clientAddress) : undefined,
+    clientStreet: r.clientStreet ? String(r.clientStreet) : undefined,
+    clientCity: r.clientCity ? String(r.clientCity) : undefined,
+    clientPostcode: r.clientPostcode ? String(r.clientPostcode) : undefined,
+    clientCountry: r.clientCountry ? String(r.clientCountry) : undefined,
     invnum: String(r.invnum ?? ""),
     poNumber: r.poNumber ? String(r.poNumber) : undefined,
     lineItems,

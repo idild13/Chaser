@@ -50,6 +50,7 @@ export default function MyInfoScreen() {
   const [numberFormat, setNumberFormat] = useState<NumberFormat>(
     profile.numberFormat
   );
+  const [invoiceNotes, setInvoiceNotes] = useState(profile.invoiceNotes);
   const [saved, setSaved] = useState(false);
   const [errors, setErrors] = useState<{ name?: string; email?: string }>({});
 
@@ -71,6 +72,7 @@ export default function MyInfoScreen() {
       setDefaultPaymentTerms(profile.defaultPaymentTerms);
       setDefaultTaxRate(String(profile.defaultTaxRate));
       setNumberFormat(profile.numberFormat);
+      setInvoiceNotes(profile.invoiceNotes);
     }
   }, [loaded, profile]);
 
@@ -131,6 +133,7 @@ export default function MyInfoScreen() {
       defaultPaymentTerms: defaultPaymentTerms.trim() || "Net-30",
       defaultTaxRate: isNaN(rate) || rate < 0 ? 0 : rate,
       numberFormat,
+      invoiceNotes: invoiceNotes.trim(),
     });
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setSaved(true);
@@ -415,6 +418,25 @@ export default function MyInfoScreen() {
             </View>
             <Text style={s.hint}>
               Preview: {formatMoney(1234.5, defaultCurrency, numberFormat)}
+            </Text>
+          </View>
+
+          <View style={s.field}>
+            <Text style={s.label}>Business Notes</Text>
+            <TextInput
+              style={[s.input, s.textArea]}
+              placeholder={
+                "e.g. Gemäß §19 UStG wird keine Umsatzsteuer berechnet."
+              }
+              placeholderTextColor={colors.mutedForeground}
+              value={invoiceNotes}
+              onChangeText={setInvoiceNotes}
+              multiline
+              testID="myinfo-invoice-notes"
+            />
+            <Text style={s.hint}>
+              Appears at the bottom of every invoice PDF and pre-fills the
+              notes field on new invoices — you can still edit it per invoice.
             </Text>
           </View>
         </View>
