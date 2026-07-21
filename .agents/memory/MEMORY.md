@@ -1,2 +1,3 @@
 - [Expo web static export](expo-web-static-export.md) — Expo web `.ttf` assets land under `.pnpm/` dot-dir → 404 on Vercel; use the `export:web` sanitizer + the no-zip-tooling packaging notes.
 - [Web PDF print](web-pdf-print.md) — on web/PWA, print invoices via a hidden iframe (not window.open, which traps standalone PWA users); clean up on `onafterprint` + long fallback.
+- [GitHub sync & agent git limits](github-sync-and-git-limits.md) — agent can fetch/push but never merge/commit locally; use the GitHub connector token + REST API to reconcile diverged repos.

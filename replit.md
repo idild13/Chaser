@@ -57,6 +57,11 @@ _Populate as you build — explicit user instructions worth remembering across s
 - When adding any amount to the UI or PDF, decide deliberately between `total` (the invoice's value) and `balanceDue` (what's still owed). Chase/reminder surfaces use `balanceDue`; the invoice's headline value uses `total`.
 - Any code path that leaves an invoice effectively paid (`balanceDue <= ~0.005`) must stamp `paidAt` (`existing ?? new Date().toISOString()`); a path that re-opens a balance must clear it (`paidAt: undefined`). The avg-payment-days metric counts only invoices with a `paidAt`, so a missed stamp silently drops a paid invoice from the metric.
 
+## GitHub
+
+- Connected to https://github.com/idild13/Chaser (remote `subrepl-6b33ra22`). Histories were reconciled in July 2026: GitHub `main` now tracks this project exactly; the repo's original manually-uploaded history is preserved on branch `old-github-main` (the old Vercel PR is based on it and is obsolete). `LICENSE` at the repo root was carried over from that history.
+- Normal pushes fast-forward. Do not force-push or rewrite history on `main`; auto-sync (Git pane) relies on the histories staying linear.
+
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
