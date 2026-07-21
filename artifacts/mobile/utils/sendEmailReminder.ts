@@ -76,10 +76,19 @@ export async function sendEmailReminder(
   const url = `mailto:${encodeURIComponent(recipient)}?${query}`;
 
   // On web, canOpenURL returns false for mailto and silently blocks the
-  // reminder. Open the mail client directly instead.
+  // reminder. Launch the mail client via a synthetic anchor click: navigating
+  // the frame itself (window.open with _self) to an external protocol is
+  // silently blocked inside embedded iframes (e.g. the Replit preview), while
+  // an anchor click is treated like a normal mailto link and reliably hands
+  // off to the OS mail handler.
   if (Platform.OS === "web") {
-    if (typeof window !== "undefined") {
-      window.open(url, "_self");
+    if (typeof document !== "undefined") {
+      const a = document.createElement("a");
+      a.href = url;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
     }
     return;
   }

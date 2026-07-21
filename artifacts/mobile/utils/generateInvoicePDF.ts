@@ -76,7 +76,30 @@ function invoiceFileBaseName(inv: Invoice): string {
 
 // ---- HTML builder ----------------------------------------------------------
 
-function buildHTML(inv: Invoice, profile: BusinessProfile): string {
+// Print-dialog CSS, used only for the web "Save as PDF" path. The browser
+// adds its own @page margins, so the on-screen page padding and the roomy
+// vertical gaps would otherwise push the footer onto a second page. Native
+// expo-print output is untouched (it relies on the on-screen padding).
+const WEB_PRINT_CSS = `
+    @page { size: A4; margin: 14mm 12mm; }
+    @media print {
+      .page { max-width: none; padding: 0; }
+      .header { margin-bottom: 28px; }
+      .invoice-title-row { padding-bottom: 16px; margin-bottom: 20px; }
+      .parties { margin-bottom: 24px; }
+      .totals { margin-bottom: 24px; }
+      .info-grid { margin-bottom: 16px; }
+      .pay-now-wrap { margin-bottom: 24px; }
+      .table tr { page-break-inside: avoid; }
+      .totals, .notes, .footer { page-break-inside: avoid; }
+    }
+`;
+
+function buildHTML(
+  inv: Invoice,
+  profile: BusinessProfile,
+  opts: { webPrint?: boolean } = {}
+): string {
   const totals = computeInvoiceTotals(inv);
   const money = (v: number) => esc(formatMoney(v, inv.currency, profile.numberFormat));
 
@@ -451,6 +474,7 @@ function buildHTML(inv: Invoice, profile: BusinessProfile): string {
     }
     .footer-brand { font-size: 13px; font-weight: 700; color: #1D9E75; }
     .footer-note { font-size: 11px; color: #6B7280; }
+    ${opts.webPrint ? WEB_PRINT_CSS : ""}
   </style>
 </head>
 <body>
@@ -580,7 +604,6 @@ export async function exportInvoicePDF(
   legacyEmail?: string
 ): Promise<void> {
   const profile = resolveProfile(profileOrName, legacyEmail);
-  const html = buildHTML(inv, profile);
 
   if (Platform.OS === "web") {
     // Render the invoice into a hidden, off-screen iframe and print from there.
@@ -589,6 +612,16 @@ export async function exportInvoicePDF(
     // the bottom tab bar) mounted, so after printing the user remains on the
     // invoices screen with navigation fully functional.
     if (typeof document === "undefined") return;
+
+    const html = buildHTML(inv, profile, { webPrint: true });
+
+    // Browsers derive the suggested "Save as PDF" file name from the TOP-LEVEL
+    // document title, not the printed iframe's title. Temporarily rename this
+    // page to the invoice file base so the dialog suggests
+    // "Client_Invoice_DueDate.pdf" instead of the app's tab title; cleanup
+    // restores the original title.
+    const prevTitle = document.title;
+    document.title = invoiceFileBaseName(inv);
 
     const iframe = document.createElement("iframe");
     iframe.setAttribute("aria-hidden", "true");
@@ -607,12 +640,14 @@ export async function exportInvoicePDF(
       cleaned = true;
       if (fallbackTimer) clearTimeout(fallbackTimer);
       if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+      document.title = prevTitle;
     };
 
     const frameWin = iframe.contentWindow;
     const doc = frameWin?.document;
     if (!frameWin || !doc) {
       iframe.remove();
+      document.title = prevTitle;
       return;
     }
 
@@ -640,6 +675,7 @@ export async function exportInvoicePDF(
     return;
   }
 
+  const html = buildHTML(inv, profile);
   const { uri } = await Print.printToFileAsync({ html, base64: false });
 
   // Print writes a UUID-named temp file; copy it to a recognizable name so the
