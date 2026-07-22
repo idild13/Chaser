@@ -1,0 +1,7 @@
+{
+  "installCommand": "pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm --filter @workspace/mobile run export:web",
+  "outputDirectory": "artifacts/mobile/static-build/web",
+  "cleanUrls": true,
+  "trailingSlash": false
+}

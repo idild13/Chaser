@@ -28,6 +28,17 @@ remains is server-runtime metadata, unreferenced by client URLs and harmless for
 static hosting. Keep `app.json` `web.output: "static"` (with `"single"`,
 expo-router ignores `+html.tsx` and the PWA head tags vanish).
 
+**Vercel now builds from source (July 2026):** the GitHub repo is connected to
+the user's Vercel project, and a root `vercel.json` sets
+`buildCommand: pnpm --filter @workspace/mobile run export:web` with
+`outputDirectory: artifacts/mobile/static-build/web`; root `package.json` pins
+`packageManager` so Vercel's corepack matches the workspace pnpm. Manual
+ZIP/upload packaging is only a fallback — do not commit build output to the
+repo. **Gotcha:** a dashboard-connected Vercel project that previously served
+plain static files has no build step; pushing source without a root
+`vercel.json` makes every production deploy fail while the old deployment
+stays live.
+
 **Env constraint when packaging the build:** this container has no
 `zip`/`python3`/`bsdtar`/`7z`/`jar` — only `tar` + `node`. Build the deploy ZIP
 with a short Node `zlib.deflateRawSync` + CRC32 + central-directory script
