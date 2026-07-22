@@ -1,3 +1,4 @@
+import { Analytics } from "@vercel/analytics/react";
 import { ScrollViewStyleReset } from "expo-router/html";
 import { type PropsWithChildren } from "react";
 
@@ -34,7 +35,10 @@ export default function Root({ children }: PropsWithChildren) {
         <ScrollViewStyleReset />
         <script dangerouslySetInnerHTML={{ __html: swRegistration }} />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        <Analytics />
+      </body>
     </html>
   );
 }
