@@ -81,15 +81,31 @@ function invoiceFileBaseName(inv: Invoice): string {
 // vertical gaps would otherwise push the footer onto a second page. Native
 // expo-print output is untouched (it relies on the on-screen padding).
 const WEB_PRINT_CSS = `
-    @page { size: A4; margin: 14mm 12mm; }
+    @page { size: A4; margin: 10mm 11mm; }
     @media print {
-      .page { max-width: none; padding: 0; }
-      .header { margin-bottom: 28px; }
-      .invoice-title-row { padding-bottom: 16px; margin-bottom: 20px; }
-      .parties { margin-bottom: 24px; }
-      .totals { margin-bottom: 24px; }
-      .info-grid { margin-bottom: 16px; }
-      .pay-now-wrap { margin-bottom: 24px; }
+      html, body { width: auto; height: auto; }
+      body { font-size: 12px; line-height: 1.35; }
+      .page {
+        max-width: none;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        break-after: avoid-page;
+        page-break-after: avoid;
+      }
+      .header { min-height: 36px; margin-bottom: 20px; }
+      .logo { max-height: 56px; }
+      .invoice-title-row { padding-bottom: 12px; margin-bottom: 16px; }
+      .parties { margin-bottom: 18px; }
+      .table { margin-bottom: 14px; }
+      .table th { padding: 7px 10px; }
+      .table td { padding: 9px 10px; }
+      .totals { margin-bottom: 16px; }
+      .info-grid { margin-bottom: 12px; }
+      .notes { padding: 10px 12px; margin-bottom: 10px; }
+      .late-fee { margin-bottom: 12px; }
+      .pay-now-wrap { margin-bottom: 14px; }
+      .footer { padding-top: 12px; }
       .table tr { page-break-inside: avoid; }
       .totals, .notes, .footer { page-break-inside: avoid; }
     }
