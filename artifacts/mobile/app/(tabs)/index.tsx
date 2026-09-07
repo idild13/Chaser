@@ -25,7 +25,7 @@ import {
 } from "@/context/InvoicesContext";
 import { CurrencyCode, formatMoney } from "@/utils/currency";
 import { formatDisplayDate } from "@/utils/date";
-import { sendEmailReminder } from "@/utils/sendEmailReminder";
+import { shareInvoiceReminder } from "@/utils/shareInvoiceReminder";
 
 const AVATAR_COLORS = [
   { bg: "#EEEDFE", color: "#3C3489" },
@@ -222,9 +222,15 @@ export default function DashboardScreen() {
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={[s.aiBtn, { backgroundColor: colors.warningBg }]}
-                        onPress={() => sendEmailReminder(inv, profile.name, profile.numberFormat)}
+                        onPress={() =>
+                          shareInvoiceReminder(
+                            inv,
+                            profile.name,
+                            profile.numberFormat
+                          )
+                        }
                       >
-                        <Feather name="mail" size={13} color={colors.warning} />
+                        <Feather name="share-2" size={13} color={colors.warning} />
                         <Text style={[s.aiBtnText, { color: colors.warningText }]}>Send reminder</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
@@ -281,9 +287,15 @@ export default function DashboardScreen() {
                       {isUrgent && (
                         <TouchableOpacity
                           style={[s.aiBtn, { backgroundColor: colors.warningBg }]}
-                          onPress={() => sendEmailReminder(inv, profile.name, profile.numberFormat)}
+                          onPress={() =>
+                            shareInvoiceReminder(
+                              inv,
+                              profile.name,
+                              profile.numberFormat
+                            )
+                          }
                         >
-                          <Feather name="mail" size={13} color={colors.warning} />
+                          <Feather name="share-2" size={13} color={colors.warning} />
                           <Text style={[s.aiBtnText, { color: colors.warningText }]}>Send reminder</Text>
                         </TouchableOpacity>
                       )}

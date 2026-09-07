@@ -34,7 +34,7 @@ function escMultiline(s: unknown): string {
 // Only allow safe schemes for the "Pay Now" link.
 function safeLink(url: string | undefined): string | null {
   const u = (url ?? "").trim();
-  if (u.startsWith("https://") || u.startsWith("mailto:")) return u;
+  if (u.startsWith("https://")) return u;
   return null;
 }
 
@@ -111,7 +111,7 @@ const WEB_PRINT_CSS = `
     }
 `;
 
-function buildHTML(
+export function buildInvoiceHTML(
   inv: Invoice,
   profile: BusinessProfile,
   opts: { webPrint?: boolean } = {}
@@ -629,7 +629,7 @@ export async function exportInvoicePDF(
     // invoices screen with navigation fully functional.
     if (typeof document === "undefined") return;
 
-    const html = buildHTML(inv, profile, { webPrint: true });
+    const html = buildInvoiceHTML(inv, profile, { webPrint: true });
 
     // Browsers derive the suggested "Save as PDF" file name from the TOP-LEVEL
     // document title, not the printed iframe's title. Temporarily rename this
@@ -691,7 +691,7 @@ export async function exportInvoicePDF(
     return;
   }
 
-  const html = buildHTML(inv, profile);
+  const html = buildInvoiceHTML(inv, profile);
   const { uri } = await Print.printToFileAsync({ html, base64: false });
 
   // Print writes a UUID-named temp file; copy it to a recognizable name so the

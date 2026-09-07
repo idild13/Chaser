@@ -34,7 +34,7 @@ import { formatMoney } from "@/utils/currency";
 import { formatDisplayDate } from "@/utils/date";
 import { confirmAction } from "@/utils/confirm";
 import { exportInvoicePDF } from "@/utils/generateInvoicePDF";
-import { sendEmailReminder } from "@/utils/sendEmailReminder";
+import { shareInvoiceReminder } from "@/utils/shareInvoiceReminder";
 
 const AVATAR_COLORS = [
   { bg: "#EEEDFE", color: "#3C3489" },
@@ -359,9 +359,16 @@ export default function InvoicesScreen() {
                   {getEffectiveStatus(inv) !== "paid" && (
                     <TouchableOpacity
                       style={s.actionBtnEmail}
-                      onPress={() => sendEmailReminder(inv, profile.name, profile.numberFormat)}
+                      onPress={() =>
+                        shareInvoiceReminder(
+                          inv,
+                          profile.name,
+                          profile.numberFormat
+                        )
+                      }
+                      accessibilityLabel={`Share reminder for invoice ${inv.invnum}`}
                     >
-                      <Feather name="mail" size={13} color={colors.warning} />
+                      <Feather name="share-2" size={13} color={colors.warning} />
                     </TouchableOpacity>
                   )}
                   <TouchableOpacity
